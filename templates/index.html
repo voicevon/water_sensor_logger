@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Water Logger 传感器分析诊断控制台</title>
+    <!-- 引入 Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <!-- 引入 ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-green: #10b981;
+            --accent-cyan: #06b6d4;
+            --accent-orange: #f59e0b;
+            --accent-red: #ef4444;
+            --btn-hover: #1f2937;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        header {
+            padding: 20px 40px;
+            background: linear-gradient(180deg, rgba(17, 24, 39, 0.9) 0%, rgba(11, 15, 25, 0) 100%);
+            border-bottom: 1px solid var(--card-border);
+            backdrop-filter: blur(8px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #06b6d4 0%, #10b981 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        header .status {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        header .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #4b5563;
+            border-radius: 50%;
+            transition: all 0.5s;
+        }
+
+        header .status-dot.live {
+            background-color: var(--accent-green);
+            box-shadow: 0 0 10px var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+
+        header .status-dot.connecting {
+            background-color: var(--accent-orange);
+            box-shadow: 0 0 10px var(--accent-orange);
+            animation: pulse 0.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.5; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.5; }
+        }
+
+        /* 实时直播切换开关 */
+        .live-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 6px 14px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.3s;
+        }
+        .live-toggle:hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .live-toggle.active {
+            border-color: var(--accent-green);
+            background: rgba(16,185,129,0.08);
+        }
+        .live-toggle .toggle-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            transition: color 0.3s;
+        }
+        .live-toggle.active .toggle-label {
+            color: var(--accent-green);
+        }
+        /* 开关滑块 */
+        .switch {
+            position: relative;
+            width: 36px;
+            height: 20px;
+        }
+        .switch input { display: none; }
+        .switch-slider {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            transition: 0.3s;
+        }
+        .switch-slider:before {
+            content: '';
+            position: absolute;
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        input:checked + .switch-slider {
+            background: var(--accent-green);
+        }
+        input:checked + .switch-slider:before {
+            transform: translateX(16px);
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            padding: 24px 40px;
+            gap: 24px;
+            max-width: 1800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* 侧边控制面板 */
+        .sidebar {
+            width: 320px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(16px);
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .section-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+            border-left: 3px solid var(--accent-cyan);
+            padding-left: 8px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        select, input[type="number"] {
+            width: 100%;
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        select:focus, input[type="number"]:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 8px rgba(6, 182, 212, 0.3);
+        }
+
+        select option {
+            background-color: var(--card-bg);
+            color: var(--text-main);
+        }
+
+        .param-group {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* 滑块样式 */
+        .slider-container {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .slider-val {
+            font-weight: 600;
+            color: var(--accent-cyan);
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.6);
+            transition: transform 0.1s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .channel-tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 8px 0;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            background-color: var(--accent-cyan);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+        }
+
+        .apply-btn {
+            width: 100%;
+            background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-green) 100%);
+            border: none;
+            color: #ffffff;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2);
+            margin-top: 10px;
+        }
+
+        .apply-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
+
+        .apply-btn:active {
+            transform: translateY(0);
+        }
+
+        /* 右侧图表与展示区 */
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .chart-card {
+            flex: 1;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            position: relative;
+            backdrop-filter: blur(16px);
+            min-height: 550px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            transition: border-color 0.5s;
+        }
+        .chart-card.live-border {
+            border-color: rgba(16, 185, 129, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(0,0,0,0.37), 0 0 20px rgba(16,185,129,0.06);
+        }
+
+        #chart {
+            width: 100%;
+            height: 100%;
+            min-height: 500px;
+        }
+
+        /* 实时追加计数器 */
+        .live-badge {
+            position: absolute;
+            top: 20px;
+            right: 24px;
+            display: none;
+            align-items: center;
+            gap: 6px;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--accent-green);
+        }
+        .live-badge.visible {
+            display: flex;
+        }
+        .live-badge .blink-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+
+        /* 状态与统计微卡片 */
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        .metric-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 16px;
+            backdrop-filter: blur(16px);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .metric-title {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .metric-val {
+            font-size: 1.4rem;
+            font-weight: bold;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .state-tag {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .state-tag.dry {
+            background-color: rgba(156, 163, 175, 0.15);
+            color: var(--text-muted);
+            border: 1px solid rgba(156, 163, 175, 0.3);
+        }
+
+        .state-tag.wet {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.1);
+        }
+
+        /* 新数据闪烁动画 */
+        @keyframes flash-new {
+            0% { background: rgba(6, 182, 212, 0.15); }
+            100% { background: transparent; }
+        }
+        .metric-card.flash {
+            animation: flash-new 0.6s ease-out;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1><span>💧</span> Water Logger 传感器数据诊断仪表盘</h1>
+        <div class="header-right">
+            <!-- 实时直播开关 -->
+            <div class="live-toggle" id="live-toggle" onclick="toggleLiveMode()">
+                <div class="switch">
+                    <input type="checkbox" id="live-checkbox">
+                    <span class="switch-slider"></span>
+                </div>
+                <span class="toggle-label">实时直播</span>
+            </div>
+            <div class="status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">就绪</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- 侧边参数控制器 -->
+        <div class="sidebar">
+            <div class="control-group">
+                <div class="section-title">观测通道</div>
+                <div class="channel-tabs">
+                    <button class="tab-btn active" onclick="switchChannel(1)">次氯酸钠</button>
+                    <button class="tab-btn" onclick="switchChannel(2)">碳源</button>
+                    <button class="tab-btn" onclick="switchChannel(3)">铁盐</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div class="section-title">数据源配置</div>
+                <label for="date-select">选择日志日期</label>
+                <select id="date-select" onchange="fetchData()">
+                    <!-- 动态加载 -->
+                </select>
+            </div>
+
+            <div class="control-group">
+                <div class="section-title">选择算法</div>
+                <select id="algo-select">
+                    <option value="dynamic">动态阈值</option>
+                    <option value="discrete">离散方差</option>
+                    <option value="envelope">包络范围</option>
+                </select>
+            </div>
+
+            <div class="control-group" style="gap: 16px;">
+                <div class="section-title">算法调参</div>
+                
+                <!-- 动态阈值 参数 -->
+                <div id="param-group-dynamic" class="param-group">
+                    <div class="slider-container">
+                        <label>门限偏移量 (Offset) <span class="slider-val" id="offset-val">50 (0.50 pF)</span></label>
+                        <input type="range" id="offset-slider" min="-200" max="200" step="5" value="50" oninput="updateSliderLabel('offset', this.value)" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>均值滤波窗口 (MA Window) <span class="slider-val" id="ma-val">50 秒</span></label>
+                        <input type="range" id="ma-slider" min="5" max="150" step="5" value="50" oninput="updateSliderLabel('ma', this.value)" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>基准线滑窗 (Baseline Window) <span class="slider-val" id="base-val">200 秒</span></label>
+                        <input type="range" id="base-slider" min="50" max="500" step="10" value="200" oninput="updateSliderLabel('base', this.value)" onchange="fetchData()">
+                    </div>
+                </div>
+
+                <!-- 离散方差 参数 -->
+                <div id="param-group-discrete" class="param-group" style="display: none;">
+                    <div class="slider-container">
+                        <label>基线均值窗口 <span class="slider-val" id="var-base-val">200 秒</span></label>
+                        <input type="range" id="var-base-slider" min="50" max="500" step="10" value="200" oninput="updateSliderLabel('var-base', this.value)" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>方差平滑窗口 <span class="slider-val" id="var-ma-val">30 秒</span></label>
+                        <input type="range" id="var-ma-slider" min="5" max="150" step="5" value="30" oninput="updateSliderLabel('var-ma', this.value)" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>方差触发阈值 <span class="slider-val" id="var-thresh-val">5</span></label>
+                        <input type="range" id="var-thresh-slider" min="0" max="50" step="0.1" value="5" oninput="updateSliderLabel('var-thresh', this.value)" onchange="fetchData()">
+                    </div>
+                </div>
+
+                <div id="param-group-envelope" class="param-group" style="display: none;">
+                    <div class="slider-container">
+                        <label>包络窗口大小 <span class="slider-val" id="env-window-val">30 秒</span></label>
+                        <input type="range" id="env-window-slider" min="10" max="200" step="5" value="30" oninput="updateSliderLabel('env-window', this.value)" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>基准线上升窗口 (Up) <span class="slider-val" id="env-dry-window-up-val">1000 秒</span></label>
+                        <input type="range" id="env-dry-window-up-slider" min="10" max="10000" step="10" value="1000" oninput="updateSliderLabel('env-dry-window-up', this.value); syncDownWindow(this.value);" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>基准线下降窗口 (Down) <span class="slider-val" id="env-dry-window-down-val">1000 秒</span></label>
+                        <input type="range" id="env-dry-window-down-slider" min="10" max="10000" step="10" value="1000" oninput="updateSliderLabel('env-dry-window-down', this.value)" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>上触发偏移量 <span class="slider-val" id="env-upper-offset-val">5.0 pF</span></label>
+                        <input type="range" id="env-upper-offset-slider" min="0.1" max="8" step="0.1" value="5.0" oninput="updateSliderLabel('env-upper-offset', this.value)" onchange="fetchData()">
+                    </div>
+                    <div class="slider-container">
+                        <label>下触发偏移量 <span class="slider-val" id="env-lower-offset-val">3.0 pF</span></label>
+                        <input type="range" id="env-lower-offset-slider" min="0.1" max="8" step="0.1" value="3.0" oninput="updateSliderLabel('env-lower-offset', this.value)" onchange="fetchData()">
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div class="section-title">渲染选项</div>
+                <label for="downsample-select">降采样频率 (优化卡顿)</label>
+                <select id="downsample-select" onchange="fetchData()">
+                    <option value="1">1:1 (保留全部点)</option>
+                    <option value="5">1:5 (更平滑)</option>
+                    <option value="10" selected>1:10 (建议，超快加载)</option>
+                    <option value="30">1:30 (适用于月度大跨度)</option>
+                </select>
+            </div>
+
+            <button class="apply-btn" onclick="fetchData()">运行算法 &amp; 重新计算</button>
+        </div>
+
+        <!-- 右侧图表分析区域 -->
+        <div class="content-area">
+            <div class="chart-card" id="chart-card">
+                <!-- 实时追加角标 -->
+                <div class="live-badge" id="live-badge">
+                    <span class="blink-dot"></span>
+                    <span id="live-count-text">LIVE · +0 pts</span>
+                </div>
+                <div id="chart"></div>
+            </div>
+
+            <!-- 数据快报行 -->
+            <div class="metrics-row">
+                <div class="metric-card" id="mc-state">
+                    <div class="metric-title">当前有水状态</div>
+                    <div class="metric-val" style="margin-top: 4px;">
+                        <span id="current-state-tag" class="state-tag dry">无水 (DRY)</span>
+                    </div>
+                </div>
+                <div class="metric-card" id="mc-raw">
+                    <div class="metric-title">原始值电容量程</div>
+                    <div class="metric-val" id="metric-raw-range">-- pF</div>
+                </div>
+                <div class="metric-card" id="mc-filtered">
+                    <div class="metric-title">滤波后电容峰值</div>
+                    <div class="metric-val" id="metric-filtered-max" style="color: var(--accent-green);">-- pF</div>
+                </div>
+                <div class="metric-card" id="mc-pts">
+                    <div class="metric-title">加载数据秒数</div>
+                    <div class="metric-val" id="metric-points-count" style="color: var(--accent-cyan);">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        //  全局状态
+        // ============================================================
+        let currentChannel = 1;
+        let myChart = null;
+        let cachedData = null;
+
+        // 实时模式状态
+        let isLiveMode = false;
+        let eventSource = null;       // SSE 连接实例
+        let liveAppendCount = 0;      // 本次实时追加点数
+
+        // 实时模式的数据缓冲（与 cachedData 同结构，但存储全部 live 数据）
+        let liveData = null;
+
+        // ============================================================
+        //  配置本地记忆 (localStorage)
+        // ============================================================
+        function saveConfig() {
+            const config = {
+                channel: currentChannel,
+                date: document.getElementById('date-select').value,
+                algo: document.getElementById('algo-select').value,
+                downsample: document.getElementById('downsample-select').value,
+                params: {
+                    offset: document.getElementById('offset-slider').value,
+                    ma: document.getElementById('ma-slider').value,
+                    base: document.getElementById('base-slider').value,
+                    var_base: document.getElementById('var-base-slider').value,
+                    var_ma: document.getElementById('var-ma-slider').value,
+                    var_thresh: document.getElementById('var-thresh-slider').value,
+                    env_window: document.getElementById('env-window-slider').value,
+                    env_dry_up: document.getElementById('env-dry-window-up-slider').value,
+                    env_dry_down: document.getElementById('env-dry-window-down-slider').value,
+                    env_upper: document.getElementById('env-upper-offset-slider').value,
+                    env_lower: document.getElementById('env-lower-offset-slider').value
+                }
+            };
+            localStorage.setItem('water_logger_config', JSON.stringify(config));
+        }
+
+        function loadConfig() {
+            try {
+                const saved = localStorage.getItem('water_logger_config');
+                if (!saved) return;
+                const config = JSON.parse(saved);
+
+                if (config.channel) {
+                    currentChannel = config.channel;
+                    const btns = document.querySelectorAll('.tab-btn');
+                    btns.forEach((btn, idx) => {
+                        btn.classList.toggle('active', idx === currentChannel - 1);
+                    });
+                }
+
+                if (config.date) {
+                    const dateSelect = document.getElementById('date-select');
+                    for (let i = 0; i < dateSelect.options.length; i++) {
+                        if (dateSelect.options[i].value === config.date) {
+                            dateSelect.value = config.date;
+                            break;
+                        }
+                    }
+                }
+
+                if (config.algo) {
+                    document.getElementById('algo-select').value = config.algo;
+                    document.querySelectorAll('.param-group').forEach(el => el.style.display = 'none');
+                    document.getElementById('param-group-' + config.algo).style.display = 'block';
+                }
+
+                if (config.downsample) {
+                    document.getElementById('downsample-select').value = config.downsample;
+                }
+
+                if (config.params) {
+                    const p = config.params;
+                    const setSlider = (id, val, type) => {
+                        if (val !== undefined && document.getElementById(id)) {
+                            document.getElementById(id).value = val;
+                            updateSliderLabel(type, val);
+                        }
+                    };
+                    setSlider('offset-slider', p.offset, 'offset');
+                    setSlider('ma-slider', p.ma, 'ma');
+                    setSlider('base-slider', p.base, 'base');
+                    setSlider('var-base-slider', p.var_base, 'var-base');
+                    setSlider('var-ma-slider', p.var_ma, 'var-ma');
+                    setSlider('var-thresh-slider', p.var_thresh, 'var-thresh');
+                    setSlider('env-window-slider', p.env_window, 'env-window');
+                    setSlider('env-dry-window-up-slider', p.env_dry_up, 'env-dry-window-up');
+                    setSlider('env-dry-window-down-slider', p.env_dry_down, 'env-dry-window-down');
+                    setSlider('env-upper-offset-slider', p.env_upper, 'env-upper-offset');
+                    setSlider('env-lower-offset-slider', p.env_lower, 'env-lower-offset');
+                }
+            } catch (e) {
+                console.error("加载配置失败", e);
+            }
+        }
+
+        // ============================================================
+        //  初始化
+        // ============================================================
+        window.addEventListener('DOMContentLoaded', async () => {
+            initChart();
+            await fetchDates();
+            loadConfig();
+            await fetchData();
+            
+            document.getElementById('algo-select').addEventListener('change', function() {
+                const algo = this.value;
+                document.querySelectorAll('.param-group').forEach(el => el.style.display = 'none');
+                document.getElementById('param-group-' + algo).style.display = 'block';
+                fetchData();
+            });
+            
+            window.addEventListener('resize', () => {
+                if (myChart) myChart.resize();
+            });
+        });
+
+        // ============================================================
+        //  图表初始化
+        // ============================================================
+        function initChart() {
+            const chartDom = document.getElementById('chart');
+            myChart = echarts.init(chartDom, 'dark');
+            myChart.showLoading({
+                text: '正在推演状态机...',
+                color: '#06b6d4',
+                textColor: '#f3f4f6',
+                maskColor: 'rgba(11, 15, 25, 0.8)'
+            });
+        }
+
+        // ============================================================
+        //  实时直播开关
+        // ============================================================
+        function toggleLiveMode() {
+            isLiveMode = !isLiveMode;
+            const checkbox = document.getElementById('live-checkbox');
+            const toggle = document.getElementById('live-toggle');
+            checkbox.checked = isLiveMode;
+            toggle.classList.toggle('active', isLiveMode);
+
+            if (isLiveMode) {
+                startLiveStream();
+            } else {
+                stopLiveStream();
+            }
+        }
+
+        function setStatus(state) {
+            // state: 'idle' | 'connecting' | 'live'
+            const dot = document.getElementById('status-dot');
+            const txt = document.getElementById('status-text');
+            dot.className = 'status-dot';
+            if (state === 'live') {
+                dot.classList.add('live');
+                txt.textContent = '实时接收中';
+            } else if (state === 'connecting') {
+                dot.classList.add('connecting');
+                txt.textContent = '连接中...';
+            } else {
+                txt.textContent = '就绪';
+            }
+        }
+
+        // ============================================================
+        //  SSE 实时流接入
+        // ============================================================
+        function startLiveStream() {
+            stopLiveStream(); // 先关闭已有连接
+            liveAppendCount = 0;
+            liveData = null;
+
+            setStatus('connecting');
+
+            const algorithm = document.getElementById('algo-select').value;
+            const offset = document.getElementById('offset-slider').value;
+            const ma = document.getElementById('ma-slider').value;
+            const base = document.getElementById('base-slider').value;
+            const var_baseline_ma = document.getElementById('var-base-slider').value;
+            const var_variance_ma = document.getElementById('var-ma-slider').value;
+            const var_thresh = Math.round(parseFloat(document.getElementById('var-thresh-slider').value) * 100);
+            const env_window = document.getElementById('env-window-slider').value;
+            const env_dry_window_up = document.getElementById('env-dry-window-up-slider').value;
+            const env_dry_window_down = document.getElementById('env-dry-window-down-slider').value;
+            const env_upper_offset = Math.round(parseFloat(document.getElementById('env-upper-offset-slider').value) * 100);
+            const env_lower_offset = Math.round(parseFloat(document.getElementById('env-lower-offset-slider').value) * 100);
+            const url = `/api/stream?algorithm=${algorithm}&threshold_offset=${offset}&ma_window=${ma}&baseline_window=${base}&var_baseline_ma=${var_baseline_ma}&var_variance_ma=${var_variance_ma}&var_threshold=${var_thresh}&env_window=${env_window}&env_dry_window_up=${env_dry_window_up}&env_dry_window_down=${env_dry_window_down}&env_upper_offset=${env_upper_offset}&env_lower_offset=${env_lower_offset}&poll_interval=1.0`;
+
+            eventSource = new EventSource(url);
+
+            eventSource.onmessage = (evt) => {
+                const payload = JSON.parse(evt.data);
+
+                if (payload.type === 'snapshot') {
+                    // 首次全量快照：重置图表并全量渲染
+                    liveData = payload;
+                    liveAppendCount = 0;
+                    setStatus('live');
+                    showLiveBadge();
+
+                    // 图表卡边框变绿
+                    document.getElementById('chart-card').classList.add('live-border');
+
+                    // 全量渲染
+                    renderChart(liveData);
+
+                } else if (payload.type === 'delta') {
+                    // 增量数据：追加到 liveData 并调用 ECharts appendData
+                    if (!liveData) return;
+
+                    const newCount = payload.timestamps.length;
+                    if (newCount === 0) return;
+
+                    // 追加到缓存
+                    liveData.timestamps.push(...payload.timestamps);
+                    for (const chKey of ['sensor1', 'sensor2', 'sensor3']) {
+                        for (const metric of ['raw', 'filtered', 'baseline', 'threshold', 'state']) {
+                            liveData[chKey][metric].push(...payload[chKey][metric]);
+                        }
+                    }
+
+                    liveAppendCount += newCount;
+                    updateLiveBadge(liveAppendCount);
+
+                    // 使用 ECharts appendData 实现真正的零闪动追加
+                    appendToChart(payload);
+
+                    // 更新指标卡片（带闪烁反馈）
+                    updateMetrics(liveData[`sensor${currentChannel}`], true);
+                }
+            };
+
+            eventSource.onerror = () => {
+                setStatus('idle');
+                showLiveBadge(false);
+            };
+        }
+
+        function stopLiveStream() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            setStatus('idle');
+            showLiveBadge(false);
+            document.getElementById('chart-card').classList.remove('live-border');
+            liveData = null;
+        }
+
+        function showLiveBadge(show = true) {
+            const badge = document.getElementById('live-badge');
+            badge.classList.toggle('visible', show);
+        }
+
+        function updateLiveBadge(count) {
+            document.getElementById('live-count-text').textContent = `LIVE · +${count} pts`;
+        }
+
+        // ============================================================
+        //  ECharts 追加数据（appendData）
+        //  仅追加当前通道的数据点，避免全量 setOption
+        // ============================================================
+        function appendToChart(delta) {
+            if (!myChart || !delta) return;
+
+            const chKey = `sensor${currentChannel}`;
+            const sd = delta[chKey];
+
+            // xAxis 追加时间戳
+            const option = myChart.getOption();
+            const existingX = option.xAxis[0].data || [];
+            const newX = [...existingX, ...delta.timestamps];
+
+            // series 0: raw, 1: filtered, 2: baseline, 3: threshold
+            const algorithm = document.getElementById('algo-select').value;
+            let seriesUpdates = [];
+
+            if (algorithm === "dynamic") {
+                seriesUpdates = [
+                    { data: [...(option.series[0].data || []), ...sd.raw] },
+                    { data: [...(option.series[1].data || []), ...sd.filtered] },
+                    { data: [...(option.series[2].data || []), ...sd.baseline] },
+                    { data: [...(option.series[3].data || []), ...sd.threshold] },
+                ];
+            } else if (algorithm === "discrete") {
+                seriesUpdates = [
+                    { data: [...(option.series[0].data || []), ...sd.raw] },
+                    { data: [...(option.series[1].data || []), ...sd.baseline] },
+                    { data: [...(option.series[2].data || []), ...sd.variance] },
+                    { data: [...(option.series[3].data || []), ...sd.threshold] },
+                ];
+            } else if (algorithm === "envelope") {
+                const newDiffs = sd.filtered.map((val, idx) => +(val - sd.baseline[idx]).toFixed(2));
+                const env_upper_val = parseFloat(document.getElementById('env-upper-offset-slider').value);
+                const env_lower_val = parseFloat(document.getElementById('env-lower-offset-slider').value);
+                const newDrys = sd.threshold;
+                const newUpper = newDrys.map(val => +(val + env_upper_val).toFixed(2));
+                const newLower = newDrys.map(val => +(val + env_lower_val).toFixed(2));
+
+                seriesUpdates = [
+                    { data: [...(option.series[0].data || []), ...sd.raw] },      // Raw
+                    { data: [...(option.series[1].data || []), ...sd.filtered] }, // Upper
+                    { data: [...(option.series[2].data || []), ...sd.baseline] }, // Lower
+                    { data: [...(option.series[3].data || []), ...newDiffs] },    // Diff
+                    { data: [...(option.series[4].data || []), ...newDrys] },     // Dry Baseline
+                    { data: [...(option.series[5].data || []), ...newUpper] },    // UpperTrigger
+                    { data: [...(option.series[6].data || []), ...newLower] },    // LowerTrigger
+                ];
+            }
+
+            myChart.setOption({
+                xAxis: [{ data: newX }],
+                series: seriesUpdates
+            }, false);
+
+            // 自动滚动到最新数据（dataZoom 跟随最后 300 个点）
+            autoScrollDataZoom(newX.length);
+        }
+
+        /**
+         * 实时模式下自动把 dataZoom 滑块定位到最新区域（最后 300 个点）
+         */
+        function autoScrollDataZoom(totalLen) {
+            const windowSize = 300;
+            if (totalLen <= windowSize) return;
+            const endPct = 100;
+            const startPct = Math.max(0, Math.floor((1 - windowSize / totalLen) * 100));
+            myChart.setOption({
+                dataZoom: [
+                    { type: 'inside', start: startPct, end: endPct },
+                    { type: 'slider', start: startPct, end: endPct }
+                ]
+            }, false);
+        }
+
+        // ============================================================
+        //  同步 Down 窗口与 Up 窗口 (单向联动)
+        // ============================================================
+        function syncDownWindow(val) {
+            const downSlider = document.getElementById('env-dry-window-down-slider');
+            downSlider.value = val;
+            updateSliderLabel('env-dry-window-down', val);
+        }
+
+        // ============================================================
+        //  滑动条文本显示更新
+        // ============================================================
+        function updateSliderLabel(type, val) {
+            if (type === 'offset') {
+                document.getElementById('offset-val').innerText = `${val} (${(val/100).toFixed(2)} pF)`;
+            } else if (type === 'ma') {
+                document.getElementById('ma-val').innerText = `${val} 秒`;
+            } else if (type === 'base') {
+                document.getElementById('base-val').innerText = `${val} 秒`;
+            } else if (type === 'var-base') {
+                document.getElementById('var-base-val').innerText = `${val} 秒`;
+            } else if (type === 'var-ma') {
+                document.getElementById('var-ma-val').innerText = `${val} 秒`;
+            } else if (type === 'var-thresh') {
+                document.getElementById('var-thresh-val').innerText = `${val}`;
+            } else if (type === 'env-window') {
+                document.getElementById('env-window-val').innerText = `${val} 秒`;
+            } else if (type === 'env-dry-window-up') {
+                document.getElementById('env-dry-window-up-val').innerText = `${val} 秒`;
+            } else if (type === 'env-dry-window-down') {
+                document.getElementById('env-dry-window-down-val').innerText = `${val} 秒`;
+            } else if (type === 'env-upper-offset') {
+                document.getElementById('env-upper-offset-val').innerText = `${parseFloat(val).toFixed(1)} pF`;
+            } else if (type === 'env-lower-offset') {
+                document.getElementById('env-lower-offset-val').innerText = `${parseFloat(val).toFixed(1)} pF`;
+            }
+        }
+
+        // ============================================================
+        //  切换通道标签卡
+        // ============================================================
+        function switchChannel(ch) {
+            currentChannel = ch;
+            const btns = document.querySelectorAll('.tab-btn');
+            btns.forEach((btn, idx) => {
+                btn.classList.toggle('active', idx === ch - 1);
+            });
+            saveConfig();
+            // 实时模式：使用 liveData 重渲染；历史模式：使用 cachedData
+            renderChart(isLiveMode && liveData ? liveData : cachedData);
+        }
+
+        // ============================================================
+        //  获取后端可用日期
+        // ============================================================
+        async function fetchDates() {
+            try {
+                const res = await fetch('/api/available_dates');
+                const dates = await res.json();
+                const select = document.getElementById('date-select');
+                select.innerHTML = '';
+                
+                if (dates.length === 0) {
+                    const today = new Date().toISOString().split('T')[0];
+                    select.innerHTML = `<option value="${today}">${today} (无数据)</option>`;
+                    return;
+                }
+                
+                dates.forEach(date => {
+                    select.innerHTML += `<option value="${date}">${date}</option>`;
+                });
+            } catch (err) {
+                console.error("加载日期失败:", err);
+            }
+        }
+
+        // ============================================================
+        //  历史数据拉取（手动/历史模式）
+        // ============================================================
+        async function fetchData() {
+            saveConfig();
+            
+            if (isLiveMode) {
+                // 实时模式下，重新启动 SSE 流（参数可能已更新）
+                startLiveStream();
+                return;
+            }
+
+            if (myChart) myChart.showLoading();
+            
+            const date = document.getElementById('date-select').value;
+            const algorithm = document.getElementById('algo-select').value;
+            const offset = document.getElementById('offset-slider').value;
+            const ma = document.getElementById('ma-slider').value;
+            const base = document.getElementById('base-slider').value;
+            const var_baseline_ma = document.getElementById('var-base-slider').value;
+            const var_variance_ma = document.getElementById('var-ma-slider').value;
+            const var_thresh = Math.round(parseFloat(document.getElementById('var-thresh-slider').value) * 100);
+            const env_window = document.getElementById('env-window-slider').value;
+            const env_dry_window_up = document.getElementById('env-dry-window-up-slider').value;
+            const env_dry_window_down = document.getElementById('env-dry-window-down-slider').value;
+            const env_upper_offset = Math.round(parseFloat(document.getElementById('env-upper-offset-slider').value) * 100);
+            const env_lower_offset = Math.round(parseFloat(document.getElementById('env-lower-offset-slider').value) * 100);
+            const downsample = document.getElementById('downsample-select').value;
+
+            try {
+                const url = `/api/history?date=${date}&algorithm=${algorithm}&threshold_offset=${offset}&ma_window=${ma}&baseline_window=${base}&var_baseline_ma=${var_baseline_ma}&var_variance_ma=${var_variance_ma}&var_threshold=${var_thresh}&env_window=${env_window}&env_dry_window_up=${env_dry_window_up}&env_dry_window_down=${env_dry_window_down}&env_upper_offset=${env_upper_offset}&env_lower_offset=${env_lower_offset}&downsample=${downsample}`;
+                const res = await fetch(url);
+                cachedData = await res.json();
+                
+                renderChart(cachedData);
+            } catch (err) {
+                console.error("加载曲线数据失败:", err);
+            } finally {
+                if (myChart) myChart.hideLoading();
+            }
+        }
+
+        // ============================================================
+        //  全量渲染（快照 or 历史数据）
+        // ============================================================
+        function renderChart(data) {
+            if (!data || !myChart) return;
+
+            const timestamps = data.timestamps;
+            const chKey = `sensor${currentChannel}`;
+            const sensorData = data[chKey];
+
+            if (!sensorData || timestamps.length === 0) {
+                myChart.setOption({
+                    title: {
+                        text: '该日期暂无数据上报记录',
+                        left: 'center',
+                        top: 'middle',
+                        textStyle: { color: '#9ca3af', fontSize: 16 }
+                    }
+                }, true);
+                updateMetrics(null);
+                return;
+            }
+
+            const markAreaData = generateMarkArea(timestamps, sensorData.state);
+
+            const channelNames = {
+                1: '次氯酸钠',
+                2: '碳源',
+                3: '铁盐'
+            };
+
+            const algorithm = document.getElementById('algo-select').value;
+            
+            let legendData = [];
+            let seriesConfigs = [];
+            let yAxisConfigs = [
+                {
+                    type: 'value',
+                    name: '电容值 (pF)',
+                    axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+                    axisLabel: { color: '#9ca3af' },
+                    splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
+                    min: function(value) { return Math.floor(value.min - 0.5); },
+                    max: function(value) { return Math.ceil(value.max + 0.5); }
+                }
+            ];
+
+            if (algorithm === "dynamic") {
+                legendData = ['原始电容 (Raw)', '滤波信号 (Filtered)', '环境基准线 (Baseline)', '自适应门限 (Threshold)'];
+                seriesConfigs = [
+                    {
+                        name: '原始电容 (Raw)',
+                        type: 'line',
+                        data: sensorData.raw,
+                        lineStyle: { width: 1, color: 'rgba(255,255,255,0.25)' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '滤波信号 (Filtered)',
+                        type: 'line',
+                        data: sensorData.filtered,
+                        lineStyle: { width: 2.5, color: '#10b981' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb',
+                        markArea: markAreaData
+                    },
+                    {
+                        name: '环境基准线 (Baseline)',
+                        type: 'line',
+                        data: sensorData.baseline,
+                        lineStyle: { width: 2, color: '#ec4899', type: 'solid' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '自适应门限 (Threshold)',
+                        type: 'line',
+                        data: sensorData.threshold,
+                        lineStyle: { width: 1.5, color: '#ef4444', type: 'dashed' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    }
+                ];
+            } else if (algorithm === "discrete") {
+                legendData = ['原始电容 (Raw)', '长效基线 (Baseline)', '平滑方差 (Variance)'];
+                yAxisConfigs.push({
+                    type: 'value',
+                    name: '方差幅度',
+                    position: 'right',
+                    axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+                    axisLabel: { color: '#fbbf24' },
+                    splitLine: { show: false }
+                });
+                seriesConfigs = [
+                    {
+                        name: '原始电容 (Raw)',
+                        type: 'line',
+                        data: sensorData.raw,
+                        lineStyle: { width: 1, color: 'rgba(255,255,255,0.25)' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '长效基线 (Baseline)',
+                        type: 'line',
+                        data: sensorData.baseline,
+                        lineStyle: { width: 2, color: '#ec4899', type: 'solid' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '平滑方差 (Variance)',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: sensorData.filtered,
+                        lineStyle: { width: 2, color: '#fbbf24' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb',
+                        markArea: markAreaData
+                    }
+                ];
+            } else if (algorithm === "envelope") {
+                const diffData = sensorData.filtered.map((val, idx) => +(val - sensorData.baseline[idx]).toFixed(2));
+                const env_upper_val = parseFloat(document.getElementById('env-upper-offset-slider').value);
+                const env_lower_val = parseFloat(document.getElementById('env-lower-offset-slider').value);
+                const dryBaseline = sensorData.threshold; // 后端复用此字段传回 dry_baseline
+                const upperLimitData = dryBaseline.map(val => +(val + env_upper_val).toFixed(2));
+                const lowerLimitData = dryBaseline.map(val => +(val + env_lower_val).toFixed(2));
+                
+                legendData = ['原始电容 (Raw)', '包络上线 (Upper)', '包络下线 (Lower)', '极差曲线 (Diff)', '无水基准线 (Dry Baseline)', '上触发线 (Upper Trigger)', '下触发线 (Lower Trigger)'];
+                yAxisConfigs.push({
+                    type: 'value',
+                    name: '极差值 (pF)',
+                    position: 'right',
+                    axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+                    axisLabel: { color: '#f59e0b' },
+                    splitLine: { show: false }
+                });
+                seriesConfigs = [
+                    {
+                        name: '原始电容 (Raw)',
+                        type: 'line',
+                        data: sensorData.raw,
+                        lineStyle: { width: 1, color: 'rgba(255,255,255,0.25)' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb',
+                        markArea: markAreaData
+                    },
+                    {
+                        name: '包络上线 (Upper)',
+                        type: 'line',
+                        data: sensorData.filtered,
+                        lineStyle: { width: 1.5, color: 'rgba(255,255,255,0.25)', type: 'dashed' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '包络下线 (Lower)',
+                        type: 'line',
+                        data: sensorData.baseline,
+                        lineStyle: { width: 1.5, color: 'rgba(255,255,255,0.25)', type: 'dashed' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '极差曲线 (Diff)',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: diffData,
+                        itemStyle: { color: '#f59e0b' },
+                        lineStyle: { width: 2, color: '#f59e0b' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '无水基准线 (Dry Baseline)',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: dryBaseline,
+                        itemStyle: { color: '#ec4899' },
+                        lineStyle: { width: 2, color: '#ec4899' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '上触发线 (Upper Trigger)',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: upperLimitData,
+                        itemStyle: { color: '#ef4444' },
+                        lineStyle: { width: 1.5, color: '#ef4444', type: 'dashed' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    },
+                    {
+                        name: '下触发线 (Lower Trigger)',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: lowerLimitData,
+                        itemStyle: { color: '#10b981' },
+                        lineStyle: { width: 1.5, color: '#10b981', type: 'dashed' },
+                        showSymbol: false,
+                        large: true,
+                        sampling: 'lttb'
+                    }
+                ];
+            }
+
+            const option = {
+                backgroundColor: 'transparent',
+                title: {
+                    text: `通道 [${channelNames[currentChannel]}] 运行曲线推演`,
+                    left: 'center',
+                    textStyle: {
+                        color: '#f3f4f6',
+                        fontFamily: 'Outfit',
+                        fontSize: 16,
+                        fontWeight: 'bold'
+                    },
+                    top: 10
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: '#1f2937',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    textStyle: { color: '#f3f4f6' },
+                    axisPointer: {
+                        type: 'cross',
+                        label: { backgroundColor: '#374151' }
+                    },
+                    formatter: function (params) {
+                        let res = `<div style="font-weight:bold;margin-bottom:5px;">${params[0].name}</div>`;
+                        params.forEach(item => {
+                            let unit = item.seriesName.includes('Variance') ? '' : ' pF';
+                            res += `<div style="display:flex;justify-content:space-between;gap:20px;">
+                                        <span>${item.marker} ${item.seriesName}:</span>
+                                        <span style="font-weight:bold;">${item.value.toFixed(2)}${unit}</span>
+                                    </div>`;
+                        });
+                        const dataIndex = params[0].dataIndex;
+                        const stateVal = sensorData.state[dataIndex];
+                        const stateStr = stateVal === 1
+                            ? '<span style="color:#10b981;font-weight:bold;">有水 (WET)</span>'
+                            : '<span style="color:#9ca3af;">无水 (DRY)</span>';
+                        res += `<div style="margin-top:5px;border-top:1px solid rgba(255,255,255,0.1);padding-top:5px;display:flex;justify-content:space-between;">
+                                    <span>状态判定:</span>
+                                    <span>${stateStr}</span>
+                                </div>`;
+                        return res;
+                    }
+                },
+                legend: {
+                    data: legendData,
+                    bottom: 40,
+                    textStyle: { color: '#9ca3af' }
+                },
+                grid: {
+                    left: '5%',
+                    right: '5%',
+                    top: '12%',
+                    bottom: '15%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: timestamps,
+                    axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+                    axisLabel: { color: '#9ca3af' }
+                },
+                yAxis: yAxisConfigs,
+                dataZoom: [
+                    { type: 'inside', start: 0, end: 100 },
+                    {
+                        type: 'slider',
+                        start: 0,
+                        end: 100,
+                        textStyle: { color: '#9ca3af' },
+                        borderColor: 'rgba(255,255,255,0.1)',
+                        bottom: 0
+                    }
+                ],
+                series: seriesConfigs
+            };
+
+            myChart.setOption(option, true);
+            updateMetrics(sensorData);
+
+            // 实时模式：自动滚动到最新
+            if (isLiveMode) {
+                autoScrollDataZoom(timestamps.length);
+            }
+        }
+
+        // ============================================================
+        //  计算有水状态背景标记区域
+        // ============================================================
+        function generateMarkArea(timestamps, states) {
+            const areaData = [];
+            let start = null;
+            for (let i = 0; i < states.length; i++) {
+                if (states[i] === 1 && start === null) {
+                    start = timestamps[i];
+                } else if (states[i] === 0 && start !== null) {
+                    areaData.push([
+                        { name: '有水', xAxis: start },
+                        { xAxis: timestamps[i - 1] }
+                    ]);
+                    start = null;
+                }
+            }
+            if (start !== null) {
+                areaData.push([
+                    { name: '有水', xAxis: start },
+                    { xAxis: timestamps[timestamps.length - 1] }
+                ]);
+            }
+            return {
+                itemStyle: { color: 'rgba(16, 185, 129, 0.08)' },
+                label: {
+                    color: '#10b981',
+                    position: 'insideTopLeft',
+                    fontSize: 10,
+                    fontFamily: 'Inter',
+                    fontWeight: 'bold'
+                },
+                data: areaData
+            };
+        }
+
+        // ============================================================
+        //  刷新下方指标统计信息
+        // ============================================================
+        function updateMetrics(sensorData, flash = false) {
+            const stateTag = document.getElementById('current-state-tag');
+            const rawRange = document.getElementById('metric-raw-range');
+            const filteredMax = document.getElementById('metric-filtered-max');
+            const ptsCount = document.getElementById('metric-points-count');
+
+            if (!sensorData) {
+                stateTag.className = "state-tag dry";
+                stateTag.innerText = "无数据";
+                rawRange.innerText = "-- pF";
+                filteredMax.innerText = "-- pF";
+                ptsCount.innerText = "--";
+                return;
+            }
+
+            const lastState = sensorData.state[sensorData.state.length - 1];
+            if (lastState === 1) {
+                stateTag.className = "state-tag wet";
+                stateTag.innerText = "有水 (WET)";
+            } else {
+                stateTag.className = "state-tag dry";
+                stateTag.innerText = "无水 (DRY)";
+            }
+
+            const maxRaw = Math.max(...sensorData.raw);
+            const minRaw = Math.min(...sensorData.raw);
+            rawRange.innerText = `${minRaw.toFixed(2)} - ${maxRaw.toFixed(2)} pF`;
+
+            const maxFiltered = Math.max(...sensorData.filtered);
+            filteredMax.innerText = `${maxFiltered.toFixed(2)} pF`;
+
+            ptsCount.innerText = `${sensorData.raw.length} 秒`;
+
+            // 新数据闪光效果
+            if (flash) {
+                ['mc-state', 'mc-raw', 'mc-filtered', 'mc-pts'].forEach(id => {
+                    const el = document.getElementById(id);
+                    el.classList.remove('flash');
+                    void el.offsetWidth; // 强制 reflow
+                    el.classList.add('flash');
+                });
+            }
+        }
+    </script>
+</body>
+</html>
