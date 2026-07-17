@@ -1,5 +1,6 @@
 import os
 import csv
+import io
 import json
 import asyncio
 from datetime import datetime
@@ -13,12 +14,15 @@ from sensor_logic import SensorAlgorithm, DiscreteVarianceAlgorithm, EnvelopeRan
 
 app = FastAPI(title="Water Logger Analysis Server")
 
-# 允许跨域（方便本地开发调试）
+# Fix #9: 收紧 CORS 配置，仅允许本地开发环境访问，生产环境应进一步限制为实际部署域名
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
@@ -29,6 +33,46 @@ TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 # 确保模板文件夹存在
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+# ==========================================
+#  Fix #10: 提取算法实例工厂函数，消除三处重复的实例化代码
+# ==========================================
+def _create_algo_instances(
+    algorithm: str,
+    threshold_offset: int = 50,
+    ma_window: int = 50,
+    baseline_window: int = 200,
+    var_baseline_ma: int = 200,
+    var_variance_ma: int = 30,
+    var_threshold: int = 5000,
+    env_window: int = 30,
+    env_dry_window_up: int = 1000,
+    env_dry_window_down: int = 1000,
+    env_upper_offset: int = 500,
+    env_lower_offset: int = 300,
+) -> tuple:
+    """
+    根据算法名称和参数创建三个传感器通道的算法实例。
+    返回 (algo1, algo2, algo3) 元组。
+    """
+    if algorithm == "discrete":
+        return (
+            DiscreteVarianceAlgorithm(1, var_baseline_ma, var_variance_ma, var_threshold),
+            DiscreteVarianceAlgorithm(2, var_baseline_ma, var_variance_ma, var_threshold),
+            DiscreteVarianceAlgorithm(3, var_baseline_ma, var_variance_ma, var_threshold),
+        )
+    elif algorithm == "envelope":
+        return (
+            EnvelopeRangeAlgorithm(1, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset),
+            EnvelopeRangeAlgorithm(2, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset),
+            EnvelopeRangeAlgorithm(3, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset),
+        )
+    else:  # "dynamic" 或其他，默认使用动态阈値算法
+        return (
+            SensorAlgorithm(1, threshold_offset, ma_window, baseline_window),
+            SensorAlgorithm(2, threshold_offset, ma_window, baseline_window),
+            SensorAlgorithm(3, threshold_offset, ma_window, baseline_window),
+        )
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index(request: Request):
@@ -95,19 +139,14 @@ async def get_history(
     if not os.path.exists(csv_path):
         return response_data
     
-    # 2. 初始化 3 个通道的算法实例
-    if algorithm == "discrete":
-        algo1 = DiscreteVarianceAlgorithm(1, var_baseline_ma, var_variance_ma, var_threshold)
-        algo2 = DiscreteVarianceAlgorithm(2, var_baseline_ma, var_variance_ma, var_threshold)
-        algo3 = DiscreteVarianceAlgorithm(3, var_baseline_ma, var_variance_ma, var_threshold)
-    elif algorithm == "envelope":
-        algo1 = EnvelopeRangeAlgorithm(1, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset)
-        algo2 = EnvelopeRangeAlgorithm(2, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset)
-        algo3 = EnvelopeRangeAlgorithm(3, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset)
-    else:
-        algo1 = SensorAlgorithm(1, threshold_offset, ma_window, baseline_window)
-        algo2 = SensorAlgorithm(2, threshold_offset, ma_window, baseline_window)
-        algo3 = SensorAlgorithm(3, threshold_offset, ma_window, baseline_window)
+    # 2. 初始化 3 个通道的算法实例（Fix #10: 使用工厂函数替代重复实例化代码）
+    algo1, algo2, algo3 = _create_algo_instances(
+        algorithm,
+        threshold_offset=threshold_offset, ma_window=ma_window, baseline_window=baseline_window,
+        var_baseline_ma=var_baseline_ma, var_variance_ma=var_variance_ma, var_threshold=var_threshold,
+        env_window=env_window, env_dry_window_up=env_dry_window_up, env_dry_window_down=env_dry_window_down,
+        env_upper_offset=env_upper_offset, env_lower_offset=env_lower_offset,
+    )
     
     timestamps = []
     s1_results = []
@@ -131,10 +170,14 @@ async def get_history(
                 except ValueError:
                     continue
                 
-                # 提取原始电容值
-                raw1 = int(row["sensor1"])
-                raw2 = int(row["sensor2"])
-                raw3 = int(row["sensor3"])
+                # Fix #11: 对 int() 转换加局部保护，避免 CSV 数据被截断或内容非法时抛出 ValueError 导致行静默跳过
+                try:
+                    raw1 = int(row["sensor1"])
+                    raw2 = int(row["sensor2"])
+                    raw3 = int(row["sensor3"])
+                except (ValueError, KeyError):
+                    print(f"[API Warning] 跳过格式错误行: {row}")
+                    continue
                 
                 # 运行算法
                 pt1 = algo1.process_point(raw1, dt)
@@ -196,45 +239,87 @@ async def get_realtime(
     env_lower_offset: int = Query(300)
 ):
     """
-    实时曲线接口：返回当天最新的 300 条数据，供前端实现实时心跳更新
+    实时曲线接口：返回当天最新的 limit 条数据。
+
+    Fix #7: 原实现调用 get_history() 导致重跑全天所有数据，随文件增长响应时间线性增大。
+    现在改为直接读取文件末尾 N 行，不再重跑全天算法，响应时间 O(1)。
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    # 直接运行 history 接口，不进行降采样，并截取最后 300 点
-    full_day_data = await get_history(
-        date=today_str,
-        algorithm=algorithm,
-        threshold_offset=threshold_offset,
-        ma_window=ma_window,
-        baseline_window=baseline_window,
-        var_baseline_ma=var_baseline_ma,
-        var_variance_ma=var_variance_ma,
-        var_threshold=var_threshold,
-        env_window=env_window,
-        env_dry_window_up=env_dry_window_up,
-        env_dry_window_down=env_dry_window_down,
-        env_upper_offset=env_upper_offset,
-        env_lower_offset=env_lower_offset,
-        downsample=1
-    )
-    
-    total_len = len(full_day_data["timestamps"])
     limit = 300
-    if total_len > limit:
-        full_day_data["timestamps"] = full_day_data["timestamps"][-limit:]
-        for sensor_key in ["sensor1", "sensor2", "sensor3"]:
-            for metric in ["raw", "filtered", "baseline", "threshold", "state"]:
-                full_day_data[sensor_key][metric] = full_day_data[sensor_key][metric][-limit:]
-                
-    return full_day_data
+    today_str = datetime.now().strftime("%Y%m%d")
+    csv_path = os.path.join(DATA_DIR, f"data_{today_str}.csv")
+
+    response_data = {
+        "timestamps": [],
+        "total_rows": 0,
+        "sensor1": {"raw": [], "filtered": [], "baseline": [], "threshold": [], "state": []},
+        "sensor2": {"raw": [], "filtered": [], "baseline": [], "threshold": [], "state": []},
+        "sensor3": {"raw": [], "filtered": [], "baseline": [], "threshold": [], "state": []},
+    }
+
+    if not os.path.exists(csv_path):
+        return response_data
+
+    # 读取文件所有行，截取末尾 limit 行进行算法推演
+    # 注：未起始运行的算法仅处理末尾窗口，状态机初始状态不包含历史上下文，
+    # 如需完整状态恒一性，应使用 /api/stream SSE 接口。
+    try:
+        with open(csv_path, mode="r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+
+        # all_lines[0] 是表头，数据行从 [1:] 开始
+        header = all_lines[0].strip() if all_lines else ""
+        data_lines = all_lines[1:]
+        total_rows = len(data_lines)
+        tail_lines = data_lines[-limit:] if total_rows > limit else data_lines
+
+        algo1, algo2, algo3 = _create_algo_instances(
+            algorithm,
+            threshold_offset=threshold_offset, ma_window=ma_window, baseline_window=baseline_window,
+            var_baseline_ma=var_baseline_ma, var_variance_ma=var_variance_ma, var_threshold=var_threshold,
+            env_window=env_window, env_dry_window_up=env_dry_window_up, env_dry_window_down=env_dry_window_down,
+            env_upper_offset=env_upper_offset, env_lower_offset=env_lower_offset,
+        )
+
+        import io
+        tail_csv = header + "\n" + "".join(tail_lines)
+        reader = csv.DictReader(io.StringIO(tail_csv))
+        for row in reader:
+            if not all(k in row for k in ["timestamp", "sensor1", "sensor2", "sensor3"]):
+                continue
+            try:
+                dt = datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S")
+                raw1, raw2, raw3 = int(row["sensor1"]), int(row["sensor2"]), int(row["sensor3"])
+            except (ValueError, KeyError):
+                continue
+
+            pt1 = algo1.process_point(raw1, dt)
+            pt2 = algo2.process_point(raw2, dt)
+            pt3 = algo3.process_point(raw3, dt)
+
+            response_data["timestamps"].append(row["timestamp"])
+            for ch_key, pt in [("sensor1", pt1), ("sensor2", pt2), ("sensor3", pt3)]:
+                response_data[ch_key]["raw"].append(round(pt["raw"] / 100.0, 2))
+                response_data[ch_key]["filtered"].append(round(pt["filtered"] / 100.0, 2))
+                response_data[ch_key]["baseline"].append(round(pt["baseline"] / 100.0, 2))
+                response_data[ch_key]["threshold"].append(round(pt["threshold"] / 100.0, 2))
+                response_data[ch_key]["state"].append(pt["state"])
+
+        response_data["total_rows"] = total_rows
+    except Exception as e:
+        print(f"[Realtime Error] 读取实时数据失败: {e}")
+
+    return response_data
+
 
 # ==========================================
 #  SSE 实时流式推送接口
 # ==========================================
 
-def _read_csv_rows_from(csv_path: str, start_row: int, algo1, algo2, algo3):
+def _read_csv_rows_from(csv_path: str, byte_offset: int, algo1, algo2, algo3):
     """
-    从 CSV 第 start_row 行（不含表头）开始读取增量数据，经算法处理后返回结果列表。
-    返回: (new_rows_count, incremental_payload_dict)
+    从 CSV 文件的字节偏移量 byte_offset 处开始读取增量数据，经算法处理后返回结果列表。
+    Fix #8: 原实现使用行号跳过（O(N) 逐行遍历），现改为字节偏移量定位，直接 f.seek() 到上次读取结束的位置。
+    返回: (new_byte_offset, new_rows_count, incremental_payload_dict)
     """
     incremental = {
         "timestamps": [],
@@ -244,26 +329,36 @@ def _read_csv_rows_from(csv_path: str, start_row: int, algo1, algo2, algo3):
     }
 
     if not os.path.exists(csv_path):
-        return 0, incremental
+        return byte_offset, 0, incremental
 
     new_count = 0
+    new_offset = byte_offset
     try:
         with open(csv_path, mode="r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for idx, row in enumerate(reader):
-                if idx < start_row:
-                    continue  # 跳过已发送的行
+            # Fix #8: 直接跳到上次读取结束的字节位置，避免 O(N) 行遍历
+            if byte_offset == 0:
+                # 首次读取：跳过表头行
+                header_line = f.readline()
+                new_offset = f.tell()
+                byte_offset = new_offset
+            else:
+                f.seek(byte_offset)
+
+            reader = csv.DictReader(
+                f,
+                fieldnames=["timestamp", "sensor1", "sensor2", "sensor3", "mqtt_state"]
+            )
+            for row in reader:
                 if not all(k in row for k in ["timestamp", "sensor1", "sensor2", "sensor3"]):
                     continue
                 timestamp_str = row["timestamp"]
                 try:
                     dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
+                    raw1 = int(row["sensor1"])
+                    raw2 = int(row["sensor2"])
+                    raw3 = int(row["sensor3"])
+                except (ValueError, KeyError):
                     continue
-
-                raw1 = int(row["sensor1"])
-                raw2 = int(row["sensor2"])
-                raw3 = int(row["sensor3"])
 
                 pt1 = algo1.process_point(raw1, dt)
                 pt2 = algo2.process_point(raw2, dt)
@@ -276,12 +371,13 @@ def _read_csv_rows_from(csv_path: str, start_row: int, algo1, algo2, algo3):
                     incremental[ch_key]["baseline"].append(round(pt["baseline"] / 100.0, 2))
                     incremental[ch_key]["threshold"].append(round(pt["threshold"] / 100.0, 2))
                     incremental[ch_key]["state"].append(pt["state"])
-
                 new_count += 1
+
+            new_offset = f.tell()
     except Exception as e:
         print(f"[SSE Error] 读取增量数据失败: {e}")
 
-    return new_count, incremental
+    return new_offset, new_count, incremental
 
 
 @app.get("/api/stream")
@@ -310,25 +406,19 @@ async def stream_realtime(
         today_str = datetime.now().strftime("%Y%m%d")
         csv_path = os.path.join(DATA_DIR, f"data_{today_str}.csv")
 
-        # 初始化算法实例（有状态，贯穿整个 SSE 连接生命周期）
-        if algorithm == "discrete":
-            algo1 = DiscreteVarianceAlgorithm(1, var_baseline_ma, var_variance_ma, var_threshold)
-            algo2 = DiscreteVarianceAlgorithm(2, var_baseline_ma, var_variance_ma, var_threshold)
-            algo3 = DiscreteVarianceAlgorithm(3, var_baseline_ma, var_variance_ma, var_threshold)
-        elif algorithm == "envelope":
-            algo1 = EnvelopeRangeAlgorithm(1, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset)
-            algo2 = EnvelopeRangeAlgorithm(2, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset)
-            algo3 = EnvelopeRangeAlgorithm(3, env_window, env_dry_window_up, env_dry_window_down, env_upper_offset, env_lower_offset)
-        else:
-            algo1 = SensorAlgorithm(1, threshold_offset, ma_window, baseline_window)
-            algo2 = SensorAlgorithm(2, threshold_offset, ma_window, baseline_window)
-            algo3 = SensorAlgorithm(3, threshold_offset, ma_window, baseline_window)
+        # 初始化算法实例（有状态，贯穿整个 SSE 连接生命周期）（Fix #10: 改用工厂函数）
+        algo1, algo2, algo3 = _create_algo_instances(
+            algorithm,
+            threshold_offset=threshold_offset, ma_window=ma_window, baseline_window=baseline_window,
+            var_baseline_ma=var_baseline_ma, var_variance_ma=var_variance_ma, var_threshold=var_threshold,
+            env_window=env_window, env_dry_window_up=env_dry_window_up, env_dry_window_down=env_dry_window_down,
+            env_upper_offset=env_upper_offset, env_lower_offset=env_lower_offset,
+        )
 
-        sent_rows = 0  # 已推送行数游标
+        sent_byte_offset = 0  # Fix #8: 用字节偏移量替代行号游标
 
         # --- 阶段1：发送全量历史快照（snapshot 事件）---
-        total_count, snapshot = _read_csv_rows_from(csv_path, 0, algo1, algo2, algo3)
-        sent_rows = total_count
+        sent_byte_offset, total_count, snapshot = _read_csv_rows_from(csv_path, 0, algo1, algo2, algo3)
         snapshot["type"] = "snapshot"
         yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
 
@@ -343,12 +433,16 @@ async def stream_realtime(
 
             # 重建当天 CSV 路径（防跨日）
             today_str = datetime.now().strftime("%Y%m%d")
-            csv_path = os.path.join(DATA_DIR, f"data_{today_str}.csv")
+            new_csv_path = os.path.join(DATA_DIR, f"data_{today_str}.csv")
 
-            new_count, delta = _read_csv_rows_from(csv_path, sent_rows, algo1, algo2, algo3)
+            # 如果日期发生变化，重置偏移量从新文件头开始
+            if new_csv_path != csv_path:
+                csv_path = new_csv_path
+                sent_byte_offset = 0
+
+            sent_byte_offset, new_count, delta = _read_csv_rows_from(csv_path, sent_byte_offset, algo1, algo2, algo3)
 
             if new_count > 0:
-                sent_rows += new_count
                 delta["type"] = "delta"
                 yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
 

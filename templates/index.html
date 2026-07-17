@@ -677,6 +677,8 @@
 
                 if (config.params) {
                     const p = config.params;
+                    // Fix #15: 对每个字段做存在性检查，防止旧版本 localStorage 配置缺少新字段
+                    //         导致 slider.value = undefined 将滑块内容设为字符串 'undefined'
                     const setSlider = (id, val, type) => {
                         if (val !== undefined && document.getElementById(id)) {
                             document.getElementById(id).value = val;
@@ -892,7 +894,8 @@
                 seriesUpdates = [
                     { data: [...(option.series[0].data || []), ...sd.raw] },
                     { data: [...(option.series[1].data || []), ...sd.baseline] },
-                    { data: [...(option.series[2].data || []), ...sd.variance] },
+                    // Fix #12: 平滑方差在后端使用 filtered 字段传输，原字段名 sd.variance 不存在导致 silent bug
+                    { data: [...(option.series[2].data || []), ...sd.filtered] },
                     { data: [...(option.series[3].data || []), ...sd.threshold] },
                 ];
             } else if (algorithm === "envelope") {
@@ -1427,11 +1430,13 @@
                 stateTag.innerText = "无水 (DRY)";
             }
 
-            const maxRaw = Math.max(...sensorData.raw);
-            const minRaw = Math.min(...sensorData.raw);
+            // Fix #13: 改用 reduce 替代 Math.max(...array)
+            // Math.max(...bigArray) 展开运算符在数组超过 ~10万元素时可能超过调用栈限制，抛出 RangeError
+            const maxRaw = sensorData.raw.reduce((a, b) => Math.max(a, b), -Infinity);
+            const minRaw = sensorData.raw.reduce((a, b) => Math.min(a, b), Infinity);
             rawRange.innerText = `${minRaw.toFixed(2)} - ${maxRaw.toFixed(2)} pF`;
 
-            const maxFiltered = Math.max(...sensorData.filtered);
+            const maxFiltered = sensorData.filtered.reduce((a, b) => Math.max(a, b), -Infinity);
             filteredMax.innerText = `${maxFiltered.toFixed(2)} pF`;
 
             ptsCount.innerText = `${sensorData.raw.length} 秒`;

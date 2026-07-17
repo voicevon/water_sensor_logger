@@ -7,10 +7,16 @@ import paho.mqtt.client as mqtt
 # ==========================================
 #  MQTT 采集与持久化配置
 # ==========================================
-MQTT_BROKER = "voicevon.vicp.io"          # MQTT Broker 地址 (本机运行建议使用本地网关或 127.0.0.1)
-MQTT_PORT = 1883                   # MQTT 端口
-MQTT_TOPIC = "water/sensor/status" # 数据订阅主题
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+MQTT_BROKER    = "voicevon.vicp.io"       # MQTT Broker 地址
+MQTT_PORT      = 1883                     # MQTT 端口
+MQTT_TOPIC     = "water/sensor/status"    # 数据订阅主题
+DATA_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+# ------------------------------------------
+#  站点业务配置（Fix #2：原先硬编码在 on_connect 回调里）
+# ------------------------------------------
+STATION_NAME    = "dongzhan"  # 站点名称，部署到新站点时在此修改
+SAMPLE_INTERVAL = 1           # 传感器采样间隔（秒）
 
 print(f"==================================================")
 print(f"  Water Logger 采集服务已启动")
@@ -31,8 +37,8 @@ def on_connect(client, userdata, flags, reason_code, properties):
         client.subscribe(MQTT_TOPIC)
         print(f"[MQTT] 已成功订阅主题: {MQTT_TOPIC}")
         
-        # 自动发布启动指令，触发传感器上报数据 (默认站点 "dongzhan", 采样率 1s)
-        trigger_payload = json.dumps({"name": "dongzhan", "interval": 1})
+        # 自动发布启动指令，触发传感器上报数据
+        trigger_payload = json.dumps({"name": STATION_NAME, "interval": SAMPLE_INTERVAL})
         client.publish("water/sensor/start", trigger_payload, qos=2)
         print(f"[MQTT] 已自动发送触发指令至 water/sensor/start: {trigger_payload}")
     else:
@@ -69,13 +75,14 @@ def on_message(client, userdata, msg):
         csv_filename = f"data_{date_str}.csv"
         csv_path = os.path.join(DATA_DIR, csv_filename)
         
-        file_exists = os.path.exists(csv_path)
-        
         # 5. 打开文件追加写入，并设置 newline='' 保证 Windows 换行符正常
+        #    Fix #3: 改用 f.tell() == 0 替代 os.path.exists() 判断是否需要写表头。
+        #    os.path.exists() 与 open() 之间存在 TOCTOU 竞争窗口；
+        #    f.tell() == 0 在 open() 后立即调用，是原子性的。
         with open(csv_path, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            # 如果是新文件，先写入表头
-            if not file_exists:
+            # f.tell() == 0 表示文件为空（新文件），需要写入表头
+            if f.tell() == 0:
                 writer.writerow(["timestamp", "sensor1", "sensor2", "sensor3", "mqtt_state"])
             
             # 写入一行数据
