@@ -211,10 +211,10 @@ async def get_history(
     
     # 辅助转换函数，将算法整数值转为浮点数 pF
     def fill_channel_data(ch_dict, results_list):
-        ch_dict["raw"] = [round(r["raw"] / 100.0, 2) for r in results_list]
-        ch_dict["filtered"] = [round(r["filtered"] / 100.0, 2) for r in results_list]
-        ch_dict["baseline"] = [round(r["baseline"] / 100.0, 2) for r in results_list]
-        ch_dict["threshold"] = [round(r["threshold"] / 100.0, 2) for r in results_list]
+        ch_dict["raw"] = [r["raw"] for r in results_list]
+        ch_dict["filtered"] = [r["filtered"] for r in results_list]
+        ch_dict["baseline"] = [r["baseline"] for r in results_list]
+        ch_dict["threshold"] = [r["threshold"] for r in results_list]
         ch_dict["state"] = [r["state"] for r in results_list]
         
     fill_channel_data(response_data["sensor1"], sampled_s1)
@@ -298,10 +298,10 @@ async def get_realtime(
 
             response_data["timestamps"].append(row["timestamp"])
             for ch_key, pt in [("sensor1", pt1), ("sensor2", pt2), ("sensor3", pt3)]:
-                response_data[ch_key]["raw"].append(round(pt["raw"] / 100.0, 2))
-                response_data[ch_key]["filtered"].append(round(pt["filtered"] / 100.0, 2))
-                response_data[ch_key]["baseline"].append(round(pt["baseline"] / 100.0, 2))
-                response_data[ch_key]["threshold"].append(round(pt["threshold"] / 100.0, 2))
+                response_data[ch_key]["raw"].append(pt["raw"])
+                response_data[ch_key]["filtered"].append(pt["filtered"])
+                response_data[ch_key]["baseline"].append(pt["baseline"])
+                response_data[ch_key]["threshold"].append(pt["threshold"])
                 response_data[ch_key]["state"].append(pt["state"])
 
         response_data["total_rows"] = total_rows
@@ -366,10 +366,10 @@ def _read_csv_rows_from(csv_path: str, byte_offset: int, algo1, algo2, algo3):
 
                 incremental["timestamps"].append(timestamp_str)
                 for ch_key, pt in [("sensor1", pt1), ("sensor2", pt2), ("sensor3", pt3)]:
-                    incremental[ch_key]["raw"].append(round(pt["raw"] / 100.0, 2))
-                    incremental[ch_key]["filtered"].append(round(pt["filtered"] / 100.0, 2))
-                    incremental[ch_key]["baseline"].append(round(pt["baseline"] / 100.0, 2))
-                    incremental[ch_key]["threshold"].append(round(pt["threshold"] / 100.0, 2))
+                    incremental[ch_key]["raw"].append(pt["raw"])
+                    incremental[ch_key]["filtered"].append(pt["filtered"])
+                    incremental[ch_key]["baseline"].append(pt["baseline"])
+                    incremental[ch_key]["threshold"].append(pt["threshold"])
                     incremental[ch_key]["state"].append(pt["state"])
                 new_count += 1
 

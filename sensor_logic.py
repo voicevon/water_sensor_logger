@@ -103,16 +103,17 @@ class SensorAlgorithm:
         current_state = self.state
         next_state = current_state
 
+        # Q2=A：支持负偏移（threshold_offset < 0 时信号下降触发有水，对齐 C++ 端行为）
         if current_state == 0:  # 当前无水
-            if self.filtered_value > threshold:
-                next_state = 1
-            else:
-                next_state = 0
+            if self.threshold_offset >= 0:
+                next_state = 1 if self.filtered_value > threshold else 0
+            else:  # 负偏移：信号低于（更低的）阈值时触发有水
+                next_state = 1 if self.filtered_value < threshold else 0
         else:                   # 当前有水
-            if self.filtered_value < threshold:
-                next_state = 0
-            else:
-                next_state = 1
+            if self.threshold_offset >= 0:
+                next_state = 0 if self.filtered_value < threshold else 1
+            else:  # 负偏移：信号高于（更高的）阈值时恢复无水
+                next_state = 0 if self.filtered_value > threshold else 1
 
         # 状态变更与有水计时器维护
         if next_state != current_state:
