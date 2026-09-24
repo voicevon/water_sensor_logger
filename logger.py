@@ -1,16 +1,21 @@
 import os
 import json
 import csv
+import base64
 from datetime import datetime
 import paho.mqtt.client as mqtt
 
 # ==========================================
 #  MQTT 采集与持久化配置
 # ==========================================
-MQTT_BROKER    = "voicevon.vicp.io"       # MQTT Broker 地址
-MQTT_PORT      = 1883                     # MQTT 端口
-MQTT_TOPIC     = "water/sensor/status"    # 数据订阅主题
-DATA_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+MQTT_BROKER       = "voicevon.vicp.io"       # MQTT Broker 地址
+MQTT_PORT         = 1883                     # MQTT 端口
+MQTT_USERNAME     = "von"                    # MQTT 用户名
+MQTT_PASSWORD     = "von123456"              # MQTT 密码
+MQTT_TOPIC        = "water/sensor/status"    # 数据订阅主题
+MQTT_CAMERA_TOPIC = "water/photo/status/dongzhan"  # 照片订阅主题
+DATA_DIR          = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+PHOTOS_DIR        = os.path.join(DATA_DIR, "photos")
 
 # ------------------------------------------
 #  站点业务配置（Fix #2：原先硬编码在 on_connect 回调里）
@@ -21,11 +26,14 @@ SAMPLE_INTERVAL = 1           # 传感器采样间隔（秒）
 print(f"==================================================")
 print(f"  Water Logger 采集服务已启动")
 print(f"  订阅主题: {MQTT_TOPIC}")
+print(f"  照片主题: {MQTT_CAMERA_TOPIC}")
 print(f"  数据存储路径: {DATA_DIR}")
+print(f"  照片存储路径: {PHOTOS_DIR}")
 print(f"==================================================")
 
 # 确保数据保存目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(PHOTOS_DIR, exist_ok=True)
 
 def on_connect(client, userdata, flags, reason_code, properties):
     """
@@ -36,6 +44,8 @@ def on_connect(client, userdata, flags, reason_code, properties):
         print("[MQTT] 成功连接至 MQTT Broker!")
         client.subscribe(MQTT_TOPIC)
         print(f"[MQTT] 已成功订阅主题: {MQTT_TOPIC}")
+        client.subscribe(MQTT_CAMERA_TOPIC)
+        print(f"[MQTT] 已成功订阅照片主题: {MQTT_CAMERA_TOPIC}")
         
         # 自动发布启动指令，触发传感器上报数据
         trigger_payload = json.dumps({"name": STATION_NAME, "interval": SAMPLE_INTERVAL})
@@ -52,8 +62,90 @@ def on_disconnect(client, userdata, flags, reason_code, properties):
 
 def on_message(client, userdata, msg):
     """
-    消息接收与追加写入 CSV 文件
+    消息分发：water/photo 主题保存照片，其余按传感器数据写 CSV
     """
+    if msg.topic.startswith("water/photo/"):
+        _on_camera_message(msg)
+        return
+    _on_sensor_message(msg)
+
+def _detect_image_ext(payload: bytes):
+    """根据魔数识别图片格式"""
+    if payload[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if payload[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if payload[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    return None
+
+def _parse_photo_timestamp(data: dict):
+    """
+    从 JSON 载荷中提取照片拍摄时间戳（可选字段）。
+    支持秒级 epoch 数值或 "YYYY-MM-DD HH:MM:SS" 字符串，失败返回本地当前时间。
+    """
+    ts_field = data.get("timestamp", data.get("ts"))
+    if ts_field is not None:
+        try:
+            if isinstance(ts_field, (int, float)):
+                return datetime.fromtimestamp(ts_field)
+            return datetime.strptime(str(ts_field), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+    return datetime.now()
+
+def _on_camera_message(msg):
+    """
+    接收照片并保存到 photos 目录，文件名内嵌时间戳。
+    支持两种载荷：原始二进制图片（魔数识别）、JSON 内 base64 编码图片。
+    """
+    try:
+        payload = msg.payload
+        img = None
+        ts = datetime.now()
+
+        ext = _detect_image_ext(payload)
+        if ext:
+            img = payload
+        else:
+            # 尝试 JSON + base64 载荷
+            data = json.loads(payload.decode("utf-8"))
+            ts = _parse_photo_timestamp(data)
+            for key in ("image", "data", "photo", "jpg", "jpeg", "base64", "frame"):
+                val = data.get(key)
+                if isinstance(val, str) and val:
+                    try:
+                        decoded = base64.b64decode(val)
+                    except Exception:
+                        continue
+                    ext = _detect_image_ext(decoded)
+                    if ext:
+                        img = decoded
+                        break
+
+        if not img:
+            print(f"[Photo] 无法识别的照片载荷 ({len(payload)} 字节) topic={msg.topic}")
+            return
+
+        filename = f"photo_{ts.strftime('%Y%m%d_%H%M%S')}{ext}"
+        path = os.path.join(PHOTOS_DIR, filename)
+        # 同一秒多张照片时追加序号，避免覆盖
+        seq = 1
+        while os.path.exists(path):
+            filename = f"photo_{ts.strftime('%Y%m%d_%H%M%S')}_{seq}{ext}"
+            path = os.path.join(PHOTOS_DIR, filename)
+            seq += 1
+
+        with open(path, "wb") as f:
+            f.write(img)
+        print(f"[Photo] {ts.strftime('%Y-%m-%d %H:%M:%S')} 已保存 {filename} ({len(img)} 字节) topic={msg.topic}")
+
+    except json.JSONDecodeError:
+        print(f"[ERROR] 照片载荷不是合法 JSON 也不是二进制图片: {msg.payload[:32]}")
+    except Exception as e:
+        print(f"[ERROR] 照片保存过程中发生异常: {str(e)}")
+
+def _on_sensor_message(msg):
     try:
         # 1. 解析 JSON 载荷
         payload = msg.payload.decode("utf-8")
@@ -100,16 +192,18 @@ def on_message(client, userdata, msg):
 
 def main():
     # 初始化 Paho MQTT 客户端 (兼容 paho-mqtt v1 与 v2)
+    # client_id 必须全网唯一：与远端部署的同名客户端会互相踢下线，后缀 _pc 区分本机实例
     try:
         # paho-mqtt v2.0+: 使用 VERSION2 消除 DeprecationWarning
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="water_logger_daemon", clean_session=True)
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="water_logger_daemon_pc", clean_session=True)
     except AttributeError:
         # paho-mqtt v1.x 降级兼容
-        client = mqtt.Client(client_id="water_logger_daemon", clean_session=True)
+        client = mqtt.Client(client_id="water_logger_daemon_pc", clean_session=True)
     
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
+    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     
     try:
         # 连接 Broker

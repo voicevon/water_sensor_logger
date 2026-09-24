@@ -103,6 +103,59 @@
             100% { transform: scale(0.95); opacity: 0.5; }
         }
 
+        /* 拍摄按钮 */
+        .capture-btn {
+            background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-green) 100%);
+            border: none;
+            color: #ffffff;
+            padding: 8px 18px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2);
+        }
+        .capture-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
+        .capture-btn:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        /* 定时拍摄开关 */
+        .auto-capture-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 6px 12px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.3s;
+        }
+        .auto-capture-toggle:hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .auto-capture-toggle.active {
+            border-color: var(--accent-cyan);
+            background: rgba(6,182,212,0.08);
+        }
+        .auto-capture-toggle .toggle-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            transition: color 0.3s;
+        }
+        .auto-capture-toggle.active .toggle-label {
+            color: var(--accent-cyan);
+        }
+
         /* 实时直播切换开关 */
         .live-toggle {
             display: flex;
@@ -440,6 +493,83 @@
         .metric-card.flash {
             animation: flash-new 0.6s ease-out;
         }
+
+        /* 照片记录卡片 */
+        .photo-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 20px 24px;
+            backdrop-filter: blur(16px);
+        }
+        .photo-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .photo-count {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .photo-strip {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            padding-bottom: 6px;
+        }
+        .photo-item {
+            flex: 0 0 auto;
+            cursor: pointer;
+            text-align: center;
+            transition: transform 0.2s;
+        }
+        .photo-item:hover {
+            transform: translateY(-3px);
+        }
+        .photo-thumb {
+            width: 110px;
+            height: 82px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+            display: block;
+            background: rgba(255,255,255,0.03);
+        }
+        .photo-time {
+            margin-top: 4px;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-family: 'Outfit', sans-serif;
+        }
+
+        /* 照片放大弹窗 */
+        .photo-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 1000;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            cursor: zoom-out;
+        }
+        .photo-modal.open {
+            display: flex;
+        }
+        .photo-modal img {
+            max-width: 92vw;
+            max-height: 82vh;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        .photo-modal .photo-modal-time {
+            color: #f3f4f6;
+            font-size: 0.95rem;
+            font-family: 'Outfit', sans-serif;
+        }
     </style>
 </head>
 <body>
@@ -447,6 +577,16 @@
     <header>
         <h1><span>💧</span> Water Logger 传感器数据诊断仪表盘</h1>
         <div class="header-right">
+            <!-- 定时拍摄开关：每10分钟自动拍摄一张 -->
+            <label class="auto-capture-toggle" id="auto-capture-toggle" onclick="toggleAutoCapture()">
+                <div class="switch">
+                    <input type="checkbox" id="auto-capture-checkbox">
+                    <span class="switch-slider"></span>
+                </div>
+                <span class="toggle-label">每10分钟拍摄</span>
+            </label>
+            <!-- 远程拍摄按钮 -->
+            <button class="capture-btn" id="capture-btn" onclick="triggerCapture()">📷 拍摄</button>
             <!-- 实时直播开关 -->
             <div class="live-toggle" id="live-toggle" onclick="toggleLiveMode()">
                 <div class="switch">
@@ -575,6 +715,15 @@
                 <div id="chart"></div>
             </div>
 
+            <!-- 照片记录条 -->
+            <div class="photo-card" id="photo-card" style="display: none;">
+                <div class="photo-header">
+                    <div class="section-title">📷 照片记录</div>
+                    <span class="photo-count" id="photo-count"></span>
+                </div>
+                <div class="photo-strip" id="photo-strip"></div>
+            </div>
+
             <!-- 数据快报行 -->
             <div class="metrics-row">
                 <div class="metric-card" id="mc-state">
@@ -599,6 +748,12 @@
         </div>
     </div>
 
+    <!-- 照片放大弹窗 -->
+    <div class="photo-modal" id="photo-modal" onclick="closePhotoModal()">
+        <img id="photo-modal-img" src="" alt="photo">
+        <div class="photo-modal-time" id="photo-modal-time"></div>
+    </div>
+
     <script>
         // ============================================================
         //  全局状态
@@ -614,6 +769,10 @@
 
         // 实时模式的数据缓冲（与 cachedData 同结构，但存储全部 live 数据）
         let liveData = null;
+
+        // 照片记录（当前日期）
+        let currentPhotos = [];
+        let photoPollTimer = null;   // 实时模式下的照片轮询定时器
 
         // ============================================================
         //  配置本地记忆 (localStorage)
@@ -710,7 +869,12 @@
             await fetchDates();
             loadConfig();
             await fetchData();
-            
+
+            // 恢复定时拍摄开关状态（开启则立即拍一张并启动 10 分钟循环）
+            if (localStorage.getItem('water_logger_auto_capture') === '1') {
+                toggleAutoCapture();
+            }
+
             document.getElementById('algo-select').addEventListener('change', function() {
                 const algo = this.value;
                 document.querySelectorAll('.param-group').forEach(el => el.style.display = 'none');
@@ -724,6 +888,119 @@
         });
 
         // ============================================================
+        //  照片记录：拉取 / 缩略图条 / 弹窗 / 曲线标记
+        // ============================================================
+        function todayLocal() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function photoToMs(ts) {
+            return new Date(ts.replace(' ', 'T')).getTime();
+        }
+
+        async function fetchPhotos(date) {
+            try {
+                const res = await fetch(`/api/photos?date=${date}`);
+                currentPhotos = await res.json();
+            } catch (err) {
+                console.error("加载照片失败:", err);
+                currentPhotos = [];
+            }
+            renderPhotoStrip();
+            refreshPhotoMarks();
+        }
+
+        function renderPhotoStrip() {
+            const card = document.getElementById('photo-card');
+            const strip = document.getElementById('photo-strip');
+            if (!currentPhotos.length) {
+                card.style.display = 'none';
+                strip.innerHTML = '';
+                return;
+            }
+            card.style.display = 'block';
+            document.getElementById('photo-count').textContent = `共 ${currentPhotos.length} 张`;
+            strip.innerHTML = currentPhotos.map(p => `
+                <div class="photo-item" onclick="openPhotoModal('${p.url}', '${p.timestamp}')">
+                    <img class="photo-thumb" src="${p.url}" loading="lazy">
+                    <div class="photo-time">${p.time}</div>
+                </div>
+            `).join('');
+        }
+
+        function openPhotoModal(url, ts) {
+            document.getElementById('photo-modal-img').src = url;
+            document.getElementById('photo-modal-time').textContent = ts;
+            document.getElementById('photo-modal').classList.add('open');
+        }
+
+        function closePhotoModal() {
+            document.getElementById('photo-modal').classList.remove('open');
+        }
+
+        /**
+         * 生成照片在曲线上的标记点（二分查找最近的时间戳，贴在原始值曲线上）
+         */
+        function buildPhotoMarks(sensorData, timestamps) {
+            if (!currentPhotos.length || !sensorData || !timestamps || !timestamps.length) return [];
+            const marks = [];
+            for (const p of currentPhotos) {
+                const t = photoToMs(p.timestamp);
+                let lo = 0, hi = timestamps.length - 1;
+                while (hi - lo > 1) {
+                    const mid = (lo + hi) >> 1;
+                    if (photoToMs(timestamps[mid]) < t) lo = mid; else hi = mid;
+                }
+                const idx = Math.abs(photoToMs(timestamps[lo]) - t) <= Math.abs(photoToMs(timestamps[hi]) - t) ? lo : hi;
+                // 容差 60 秒：覆盖降采样后 10~30 秒的时间轴间隔；超过则视为该时段无数据，跳过
+                if (Math.abs(photoToMs(timestamps[idx]) - t) > 60000) continue;
+                marks.push({
+                    coord: [timestamps[idx], sensorData.raw[idx]],
+                    symbol: 'image://' + p.url,
+                    symbolSize: [46, 34],
+                    symbolOffset: [0, -20]
+                });
+            }
+            return marks;
+        }
+
+        /**
+         * 将照片标记合并进图表（series[0] 的 markPoint）
+         */
+        function refreshPhotoMarks() {
+            if (!myChart) return;
+            const data = isLiveMode ? liveData : cachedData;
+            if (!data) return;
+            const sensorData = data[`sensor${currentChannel}`];
+            const marks = buildPhotoMarks(sensorData, data.timestamps);
+            // 先清空再设置，保证移除已消失的照片标记
+            myChart.setOption({ series: [{ markPoint: { data: [] } }] }, false);
+            if (marks.length) {
+                myChart.setOption({
+                    series: [{
+                        markPoint: {
+                            data: marks,
+                            animation: false
+                        }
+                    }]
+                }, false);
+            }
+        }
+
+        /**
+         * 查找悬停时间附近的照片（±1.5 秒内）
+         */
+        function findNearbyPhoto(tsStr) {
+            if (!currentPhotos.length || !tsStr) return null;
+            const t = photoToMs(tsStr);
+            for (const p of currentPhotos) {
+                if (Math.abs(photoToMs(p.timestamp) - t) < 1500) return p;
+            }
+            return null;
+        }
+
+        // ============================================================
         //  图表初始化
         // ============================================================
         function initChart() {
@@ -735,6 +1012,67 @@
                 textColor: '#f3f4f6',
                 maskColor: 'rgba(11, 15, 25, 0.8)'
             });
+        }
+
+        // ============================================================
+        //  远程拍摄：触发相机拍照并刷新照片列表
+        // ============================================================
+        async function doCapture() {
+            const res = await fetch('/api/capture', { method: 'POST' });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || 'capture failed');
+            return data;
+        }
+
+        async function triggerCapture() {
+            const btn = document.getElementById('capture-btn');
+            if (btn.disabled) return;
+            btn.disabled = true;
+            btn.textContent = '拍摄中...';
+
+            try {
+                await doCapture();
+                // 等相机上传照片后刷新照片列表（新照片属于今天）
+                const targetDate = document.getElementById('date-select').value || todayLocal();
+                setTimeout(() => {
+                    btn.textContent = '📷 拍摄';
+                    btn.disabled = false;
+                    fetchPhotos(targetDate);
+                }, 3000);
+                return;
+            } catch (err) {
+                console.error("拍摄请求异常:", err);
+                btn.textContent = '拍摄失败';
+            }
+
+            // 失败路径：1.5 秒后恢复按钮
+            setTimeout(() => {
+                btn.textContent = '📷 拍摄';
+                btn.disabled = false;
+            }, 1500);
+        }
+
+        // ============================================================
+        //  定时拍摄开关：每 10 分钟自动触发一次拍摄
+        // ============================================================
+        let autoCaptureTimer = null;
+        const AUTO_CAPTURE_INTERVAL_MS = 10 * 60 * 1000;
+
+        function toggleAutoCapture() {
+            const checkbox = document.getElementById('auto-capture-checkbox');
+            const toggle = document.getElementById('auto-capture-toggle');
+            const enabled = !checkbox.checked;
+            checkbox.checked = enabled;
+            toggle.classList.toggle('active', enabled);
+            localStorage.setItem('water_logger_auto_capture', enabled ? '1' : '0');
+
+            clearInterval(autoCaptureTimer);
+            autoCaptureTimer = null;
+            if (enabled) {
+                // 开启后先立即拍一张，之后每 10 分钟一张
+                triggerCapture();
+                autoCaptureTimer = setInterval(triggerCapture, AUTO_CAPTURE_INTERVAL_MS);
+            }
         }
 
         // ============================================================
@@ -842,6 +1180,11 @@
                 setStatus('idle');
                 showLiveBadge(false);
             };
+
+            // 实时模式：立即拉取照片并每 10 秒轮询新照片
+            fetchPhotos(todayLocal());
+            clearInterval(photoPollTimer);
+            photoPollTimer = setInterval(() => fetchPhotos(todayLocal()), 10000);
         }
 
         function stopLiveStream() {
@@ -849,6 +1192,8 @@
                 eventSource.close();
                 eventSource = null;
             }
+            clearInterval(photoPollTimer);
+            photoPollTimer = null;
             setStatus('idle');
             showLiveBadge(false);
             document.getElementById('chart-card').classList.remove('live-border');
@@ -1051,8 +1396,9 @@
                 const url = `/api/history?date=${date}&algorithm=${algorithm}&threshold_offset=${offset}&ma_window=${ma}&baseline_window=${base}&var_baseline_ma=${var_baseline_ma}&var_variance_ma=${var_variance_ma}&var_threshold=${var_thresh}&env_window=${env_window}&env_dry_window_up=${env_dry_window_up}&env_dry_window_down=${env_dry_window_down}&env_upper_offset=${env_upper_offset}&env_lower_offset=${env_lower_offset}&downsample=${downsample}`;
                 const res = await fetch(url);
                 cachedData = await res.json();
-                
+
                 renderChart(cachedData);
+                await fetchPhotos(date);   // 同步加载该日期的照片记录
             } catch (err) {
                 console.error("加载曲线数据失败:", err);
             } finally {
@@ -1322,6 +1668,14 @@
                                     <span>状态判定:</span>
                                     <span>${stateStr}</span>
                                 </div>`;
+                        // 悬停时间附近有照片时，在提示框内显示照片
+                        const photo = findNearbyPhoto(params[0].name);
+                        if (photo) {
+                            res += `<div style="margin-top:6px;">
+                                        <img src="${photo.url}" style="max-width:220px;max-height:160px;border-radius:8px;display:block;border:1px solid rgba(255,255,255,0.2);">
+                                        <div style="font-size:0.72rem;color:#9ca3af;margin-top:3px;">📷 ${photo.timestamp}</div>
+                                    </div>`;
+                        }
                         return res;
                     }
                 },
@@ -1360,6 +1714,7 @@
 
             myChart.setOption(option, true);
             updateMetrics(sensorData);
+            refreshPhotoMarks();   // 恢复/重建曲线上的照片标记
 
             // 实时模式：自动滚动到最新
             if (isLiveMode) {

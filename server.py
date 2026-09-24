@@ -2,6 +2,8 @@ import os
 import csv
 import io
 import json
+import time
+import uuid
 import asyncio
 from datetime import datetime
 from fastapi import FastAPI, Request, Query
@@ -9,6 +11,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+import paho.mqtt.client as mqtt
 
 from sensor_logic import SensorAlgorithm, DiscreteVarianceAlgorithm, EnvelopeRangeAlgorithm
 
@@ -28,11 +31,74 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
+PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 
 # 确保模板文件夹存在
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+# 照片静态文件服务（logger.py 保存照片到 data/photos/）
+os.makedirs(PHOTOS_DIR, exist_ok=True)
+app.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
+
+# ==========================================
+#  MQTT 拍摄触发配置（与 logger.py 保持一致）
+# ==========================================
+MQTT_BROKER          = "voicevon.vicp.io"
+MQTT_PORT            = 1883
+MQTT_USERNAME        = "von"
+MQTT_PASSWORD        = "von123456"
+CAMERA_TRIGGER_TOPIC = "water/photo/take"     # 相机拍摄触发主题（QoS 0）
+STATION_NAME         = "dongzhan"             # 站点名称，部署到新站点时在此修改
+
+@app.post("/api/capture")
+async def trigger_capture(motion: str = Query("off", description="异物侵入检测开关: on/off")):
+    """
+    发送 MQTT 指令触发相机拍摄一张照片。
+    协议：Topic=water/photo/take, QoS=0, JSON 载荷
+      - site_name: 目标站点名称
+      - action:    即时动作 capture
+      - motion:    异物侵入检测开关 "on"/"off"
+    使用短连接发布，用完即断，避免常驻连接。
+    """
+    motion_flag = "on" if motion == "on" else "off"
+
+    def _publish_trigger():
+        client_id = f"water_capture_req_{uuid.uuid4().hex[:8]}"
+        try:
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, clean_session=True)
+        except AttributeError:
+            client = mqtt.Client(client_id=client_id, clean_session=True)
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+        client.connect(MQTT_BROKER, MQTT_PORT, keepalive=30)
+        # 必须启动网络循环，消息才会真正发出
+        client.loop_start()
+
+        payload = json.dumps({
+            "site_name": STATION_NAME,
+            "action": "capture",
+            "motion": motion_flag,
+        })
+        info = client.publish(CAMERA_TRIGGER_TOPIC, payload, qos=0)
+        # 最多等 3 秒确认消息发出
+        deadline = time.time() + 3
+        while not info.is_published() and time.time() < deadline:
+            time.sleep(0.05)
+        published = info.is_published()
+        client.loop_stop()
+        client.disconnect()
+        if not published:
+            raise TimeoutError("MQTT 发布确认超时")
+        return payload
+
+    try:
+        payload = await asyncio.to_thread(_publish_trigger)
+        print(f"[Capture] 已发送拍摄指令: {payload}")
+        return {"ok": True, "topic": CAMERA_TRIGGER_TOPIC, "payload": payload}
+    except Exception as e:
+        print(f"[Capture] 发送拍摄指令失败: {e}")
+        return {"ok": False, "error": str(e)}
 
 # ==========================================
 #  Fix #10: 提取算法实例工厂函数，消除三处重复的实例化代码
@@ -103,6 +169,36 @@ async def get_available_dates():
     # 降序排序，最新的日期放在最前面
     dates.sort(reverse=True)
     return dates
+
+@app.get("/api/photos")
+async def get_photos(date: str = Query(..., description="查询日期，格式 YYYY-MM-DD")):
+    """
+    返回指定日期的照片列表，文件名格式 photo_YYYYMMDD_HHMMSS[_n].ext
+    """
+    clean_date = date.replace("-", "")
+    if not os.path.isdir(PHOTOS_DIR):
+        return []
+
+    photos = []
+    for fn in os.listdir(PHOTOS_DIR):
+        if not fn.startswith(f"photo_{clean_date}_"):
+            continue
+        if not fn.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+            continue
+        stem = os.path.splitext(fn)[0]
+        try:
+            dt = datetime.strptime(stem[:21], "photo_%Y%m%d_%H%M%S")
+        except ValueError:
+            continue
+        photos.append({
+            "filename": fn,
+            "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "time": dt.strftime("%H:%M:%S"),
+            "url": f"/photos/{fn}",
+        })
+
+    photos.sort(key=lambda p: p["timestamp"])
+    return photos
 
 @app.get("/api/history")
 async def get_history(
