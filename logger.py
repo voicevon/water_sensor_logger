@@ -127,13 +127,17 @@ def _on_camera_message(msg):
             print(f"[Photo] 无法识别的照片载荷 ({len(payload)} 字节) topic={msg.topic}")
             return
 
+        # 按日期子目录归档: photos/YYYYMMDD/photo_YYYYMMDD_HHMMSS.ext
+        date_dir = os.path.join(PHOTOS_DIR, ts.strftime("%Y%m%d"))
+        os.makedirs(date_dir, exist_ok=True)
+
         filename = f"photo_{ts.strftime('%Y%m%d_%H%M%S')}{ext}"
-        path = os.path.join(PHOTOS_DIR, filename)
+        path = os.path.join(date_dir, filename)
         # 同一秒多张照片时追加序号，避免覆盖
         seq = 1
         while os.path.exists(path):
             filename = f"photo_{ts.strftime('%Y%m%d_%H%M%S')}_{seq}{ext}"
-            path = os.path.join(PHOTOS_DIR, filename)
+            path = os.path.join(date_dir, filename)
             seq += 1
 
         with open(path, "wb") as f:
@@ -153,6 +157,7 @@ def _on_sensor_message(msg):
         
         # 2. 提取传感器数值（大端序 uint16 物理电容，即 pf * 100）
         # 协议规定：sensor1 到 sensor3，以及 state (开关水状态字节)
+        # 注意：原始数据如实入库，不做任何修改；黑名单覆盖在算法读取 CSV 时进行
         sensor1 = data.get("sensor1", 0)
         sensor2 = data.get("sensor2", 0)
         sensor3 = data.get("sensor3", 0)

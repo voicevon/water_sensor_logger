@@ -543,6 +543,34 @@
             font-family: 'Outfit', sans-serif;
         }
 
+        /* 曲线上照片悬停 tooltip 式放大 */
+        #photo-hover {
+            display: none;
+            position: fixed;
+            z-index: 999;
+            pointer-events: none;
+            background: rgba(17, 24, 39, 0.96);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            padding: 8px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+        }
+        #photo-hover.open { display: block; }
+        #photo-hover img {
+            display: block;
+            width: 320px;
+            max-height: 300px;
+            object-fit: contain;
+            border-radius: 6px;
+        }
+        #photo-hover .photo-hover-time {
+            margin-top: 5px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-align: center;
+            font-family: 'Outfit', sans-serif;
+        }
+
         /* 照片放大弹窗 */
         .photo-modal {
             display: none;
@@ -754,6 +782,12 @@
         <div class="photo-modal-time" id="photo-modal-time"></div>
     </div>
 
+    <!-- 曲线上照片悬停 tooltip 式放大 -->
+    <div id="photo-hover">
+        <img id="photo-hover-img" src="" alt="photo preview">
+        <div class="photo-hover-time" id="photo-hover-time"></div>
+    </div>
+
     <script>
         // ============================================================
         //  全局状态
@@ -771,7 +805,9 @@
         let liveData = null;
 
         // 照片记录（当前日期）
-        let currentPhotos = [];
+        let allPhotos = [];          // 全量照片（曲线上标记不限数量）
+        let currentPhotos = [];      // 照片记录条展示的最新 10 张
+        let currentPhotosTotal = 0;
         let photoPollTimer = null;   // 实时模式下的照片轮询定时器
 
         // ============================================================
@@ -870,10 +906,8 @@
             loadConfig();
             await fetchData();
 
-            // 恢复定时拍摄开关状态（开启则立即拍一张并启动 10 分钟循环）
-            if (localStorage.getItem('water_logger_auto_capture') === '1') {
-                toggleAutoCapture();
-            }
+            // 从服务端恢复定时拍摄开关状态（持久化在 data/config.json）
+            loadAutoCaptureState();
 
             document.getElementById('algo-select').addEventListener('change', function() {
                 const algo = this.value;
@@ -902,10 +936,15 @@
         async function fetchPhotos(date) {
             try {
                 const res = await fetch(`/api/photos?date=${date}`);
-                currentPhotos = await res.json();
+                allPhotos = await res.json();
+                // 照片记录条仅显示最新 10 张；曲线上照片标记数量不限（用全量 allPhotos）
+                currentPhotos = allPhotos.slice(-10);
+                currentPhotosTotal = allPhotos.length;
             } catch (err) {
                 console.error("加载照片失败:", err);
+                allPhotos = [];
                 currentPhotos = [];
+                currentPhotosTotal = 0;
             }
             renderPhotoStrip();
             refreshPhotoMarks();
@@ -920,7 +959,9 @@
                 return;
             }
             card.style.display = 'block';
-            document.getElementById('photo-count').textContent = `共 ${currentPhotos.length} 张`;
+            document.getElementById('photo-count').textContent = currentPhotosTotal > 10
+                ? `最新 10 张 / 共 ${currentPhotosTotal} 张`
+                : `共 ${currentPhotos.length} 张`;
             strip.innerHTML = currentPhotos.map(p => `
                 <div class="photo-item" onclick="openPhotoModal('${p.url}', '${p.timestamp}')">
                     <img class="photo-thumb" src="${p.url}" loading="lazy">
@@ -943,9 +984,9 @@
          * 生成照片在曲线上的标记点（二分查找最近的时间戳，贴在原始值曲线上）
          */
         function buildPhotoMarks(sensorData, timestamps) {
-            if (!currentPhotos.length || !sensorData || !timestamps || !timestamps.length) return [];
+            if (!allPhotos.length || !sensorData || !timestamps || !timestamps.length) return [];
             const marks = [];
-            for (const p of currentPhotos) {
+            for (const p of allPhotos) {
                 const t = photoToMs(p.timestamp);
                 let lo = 0, hi = timestamps.length - 1;
                 while (hi - lo > 1) {
@@ -956,6 +997,7 @@
                 // 容差 60 秒：覆盖降采样后 10~30 秒的时间轴间隔；超过则视为该时段无数据，跳过
                 if (Math.abs(photoToMs(timestamps[idx]) - t) > 60000) continue;
                 marks.push({
+                    name: p.timestamp,
                     coord: [timestamps[idx], sensorData.raw[idx]],
                     symbol: 'image://' + p.url,
                     symbolSize: [46, 34],
@@ -992,12 +1034,40 @@
          * 查找悬停时间附近的照片（±1.5 秒内）
          */
         function findNearbyPhoto(tsStr) {
-            if (!currentPhotos.length || !tsStr) return null;
+            if (!allPhotos.length || !tsStr) return null;
             const t = photoToMs(tsStr);
-            for (const p of currentPhotos) {
+            for (const p of allPhotos) {
                 if (Math.abs(photoToMs(p.timestamp) - t) < 1500) return p;
             }
             return null;
+        }
+
+        // ============================================================
+        //  曲线上照片标记：鼠标悬停时 tooltip 式放大显示
+        // ============================================================
+        function showPhotoHover(params) {
+            const photo = allPhotos.find(p => p.timestamp === params.name);
+            if (!photo) return;
+            const el = document.getElementById('photo-hover');
+            document.getElementById('photo-hover-img').src = photo.url;
+            document.getElementById('photo-hover-time').textContent = photo.timestamp;
+            el.classList.add('open');
+
+            // 定位到鼠标附近，超出视口时翻转方向
+            const domEvt = params.event && params.event.event;
+            const x = domEvt ? domEvt.clientX : 100;
+            const y = domEvt ? domEvt.clientY : 100;
+            const rect = el.getBoundingClientRect();
+            let left = x + 16;
+            let top = y + 16;
+            if (left + rect.width > window.innerWidth - 8) left = x - rect.width - 16;
+            if (top + rect.height > window.innerHeight - 8) top = y - rect.height - 16;
+            el.style.left = Math.max(8, left) + 'px';
+            el.style.top = Math.max(8, top) + 'px';
+        }
+
+        function hidePhotoHover() {
+            document.getElementById('photo-hover').classList.remove('open');
         }
 
         // ============================================================
@@ -1012,6 +1082,15 @@
                 textColor: '#f3f4f6',
                 maskColor: 'rgba(11, 15, 25, 0.8)'
             });
+
+            // 曲线上照片标记：hover 时以 tooltip 方式放大显示
+            myChart.on('mouseover', params => {
+                if (params.componentType === 'markPoint') showPhotoHover(params);
+            });
+            myChart.on('mouseout', params => {
+                if (params.componentType === 'markPoint') hidePhotoHover();
+            });
+            myChart.on('globalout', hidePhotoHover);
         }
 
         // ============================================================
@@ -1053,25 +1132,37 @@
         }
 
         // ============================================================
-        //  定时拍摄开关：每 10 分钟自动触发一次拍摄
+        //  定时拍摄开关：状态持久化在服务端 data/config.json
+        //  服务端后台任务每 10 分钟自动触发拍摄，浏览器关闭也有效
         // ============================================================
-        let autoCaptureTimer = null;
-        const AUTO_CAPTURE_INTERVAL_MS = 10 * 60 * 1000;
-
-        function toggleAutoCapture() {
+        async function toggleAutoCapture() {
             const checkbox = document.getElementById('auto-capture-checkbox');
             const toggle = document.getElementById('auto-capture-toggle');
             const enabled = !checkbox.checked;
-            checkbox.checked = enabled;
-            toggle.classList.toggle('active', enabled);
-            localStorage.setItem('water_logger_auto_capture', enabled ? '1' : '0');
 
-            clearInterval(autoCaptureTimer);
-            autoCaptureTimer = null;
-            if (enabled) {
-                // 开启后先立即拍一张，之后每 10 分钟一张
-                triggerCapture();
-                autoCaptureTimer = setInterval(triggerCapture, AUTO_CAPTURE_INTERVAL_MS);
+            try {
+                const res = await fetch(`/api/auto_capture?enabled=${enabled ? 'on' : 'off'}`, { method: 'POST' });
+                const data = await res.json();
+                checkbox.checked = data.auto_capture;
+                toggle.classList.toggle('active', data.auto_capture);
+                if (data.auto_capture) {
+                    // 开启后等相机上传，刷新照片列表
+                    const targetDate = document.getElementById('date-select').value || todayLocal();
+                    setTimeout(() => fetchPhotos(targetDate), 3000);
+                }
+            } catch (err) {
+                console.error("切换定时拍摄失败:", err);
+            }
+        }
+
+        async function loadAutoCaptureState() {
+            try {
+                const res = await fetch('/api/auto_capture');
+                const data = await res.json();
+                document.getElementById('auto-capture-checkbox').checked = data.auto_capture;
+                document.getElementById('auto-capture-toggle').classList.toggle('active', data.auto_capture);
+            } catch (err) {
+                console.error("加载定时拍摄状态失败:", err);
             }
         }
 

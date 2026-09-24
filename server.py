@@ -13,9 +13,21 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import paho.mqtt.client as mqtt
 
-from sensor_logic import SensorAlgorithm, DiscreteVarianceAlgorithm, EnvelopeRangeAlgorithm
+from sensor_logic import SensorAlgorithm, DiscreteVarianceAlgorithm, EnvelopeRangeAlgorithm, BAD_VALUES
 
 app = FastAPI(title="Water Logger Analysis Server")
+
+def _sanitize_raw(r1: int, r2: int, r3: int, prev: list) -> tuple:
+    """
+    黑名单原始值覆盖（原始数据层，与算法无关）：
+    命中 BAD_VALUES 的历史数据用前一行该通道的值代替。prev 为三个通道的上一次值。
+    """
+    vals = [r1, r2, r3]
+    for i, v in enumerate(vals):
+        if v in BAD_VALUES:
+            vals[i] = prev[i]
+        prev[i] = vals[i]
+    return vals[0], vals[1], vals[2]
 
 # Fix #9: 收紧 CORS 配置，仅允许本地开发环境访问，生产环境应进一步限制为实际部署域名
 app.add_middleware(
@@ -52,7 +64,57 @@ MQTT_PASSWORD        = "von123456"
 CAMERA_TRIGGER_TOPIC = "water/photo/take"     # 相机拍摄触发主题（QoS 0）
 STATION_NAME         = "dongzhan"             # 站点名称，部署到新站点时在此修改
 
-@app.post("/api/capture")
+CONFIG_FILE          = os.path.join(DATA_DIR, "config.json")  # 定时拍摄等配置持久化
+AUTO_CAPTURE_INTERVAL = 10 * 60               # 定时拍摄间隔（秒）
+
+_app_config = {"auto_capture": False, "last_capture_ts": ""}
+_auto_capture_task = None
+
+def _load_config():
+    global _app_config
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                _app_config = {**_app_config, **json.load(f)}
+    except Exception as e:
+        print(f"[Config] 读取配置失败: {e}")
+
+def _save_config():
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(_app_config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Config] 保存配置失败: {e}")
+
+def _publish_mqtt_trigger(motion_flag: str = "off"):
+    """同步发布拍摄指令（短连接，在独立线程中调用）"""
+    client_id = f"water_capture_req_{uuid.uuid4().hex[:8]}"
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, clean_session=True)
+    except AttributeError:
+        client = mqtt.Client(client_id=client_id, clean_session=True)
+    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    client.connect(MQTT_BROKER, MQTT_PORT, keepalive=30)
+    # 必须启动网络循环，消息才会真正发出
+    client.loop_start()
+
+    payload = json.dumps({
+        "site_name": STATION_NAME,
+        "action": "capture",
+        "motion": motion_flag,
+    })
+    info = client.publish(CAMERA_TRIGGER_TOPIC, payload, qos=0)
+    # 最多等 3 秒确认消息发出
+    deadline = time.time() + 3
+    while not info.is_published() and time.time() < deadline:
+        time.sleep(0.05)
+    published = info.is_published()
+    client.loop_stop()
+    client.disconnect()
+    if not published:
+        raise TimeoutError("MQTT 发布确认超时")
+    return payload
+
 async def trigger_capture(motion: str = Query("off", description="异物侵入检测开关: on/off")):
     """
     发送 MQTT 指令触发相机拍摄一张照片。
@@ -64,41 +126,81 @@ async def trigger_capture(motion: str = Query("off", description="异物侵入�
     """
     motion_flag = "on" if motion == "on" else "off"
 
-    def _publish_trigger():
-        client_id = f"water_capture_req_{uuid.uuid4().hex[:8]}"
-        try:
-            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, clean_session=True)
-        except AttributeError:
-            client = mqtt.Client(client_id=client_id, clean_session=True)
-        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-        client.connect(MQTT_BROKER, MQTT_PORT, keepalive=30)
-        # 必须启动网络循环，消息才会真正发出
-        client.loop_start()
-
-        payload = json.dumps({
-            "site_name": STATION_NAME,
-            "action": "capture",
-            "motion": motion_flag,
-        })
-        info = client.publish(CAMERA_TRIGGER_TOPIC, payload, qos=0)
-        # 最多等 3 秒确认消息发出
-        deadline = time.time() + 3
-        while not info.is_published() and time.time() < deadline:
-            time.sleep(0.05)
-        published = info.is_published()
-        client.loop_stop()
-        client.disconnect()
-        if not published:
-            raise TimeoutError("MQTT 发布确认超时")
-        return payload
-
     try:
-        payload = await asyncio.to_thread(_publish_trigger)
+        payload = await asyncio.to_thread(_publish_mqtt_trigger, motion_flag)
         print(f"[Capture] 已发送拍摄指令: {payload}")
         return {"ok": True, "topic": CAMERA_TRIGGER_TOPIC, "payload": payload}
     except Exception as e:
         print(f"[Capture] 发送拍摄指令失败: {e}")
         return {"ok": False, "error": str(e)}
+
+async def _auto_capture_loop():
+    """
+    定时拍摄后台循环：每 30 秒检查一次，到期（距上次拍摄 >= 10 分钟）自动触发拍摄。
+    上次拍摄时间持久化在 config.json，服务重启后计时恢复。
+    """
+    print("[AutoCapture] 定时拍摄任务已启动")
+    while True:
+        try:
+            if _app_config.get("auto_capture"):
+                now = datetime.now()
+                last = _app_config.get("last_capture_ts", "")
+                due = True
+                if last:
+                    try:
+                        due = (now - datetime.strptime(last, "%Y-%m-%d %H:%M:%S")).total_seconds() >= AUTO_CAPTURE_INTERVAL
+                    except ValueError:
+                        due = True
+                if due:
+                    try:
+                        await asyncio.to_thread(_publish_mqtt_trigger)
+                        _app_config["last_capture_ts"] = now.strftime("%Y-%m-%d %H:%M:%S")
+                        _save_config()
+                        print(f"[AutoCapture] {now.strftime('%H:%M:%S')} 已自动发送拍摄指令")
+                    except Exception as e:
+                        print(f"[AutoCapture] 自动拍摄失败: {e}")
+        except Exception as e:
+            print(f"[AutoCapture] 循环异常: {e}")
+        await asyncio.sleep(30)
+
+@app.post("/api/auto_capture")
+async def set_auto_capture(enabled: str = Query(..., description="on/off")):
+    """
+    开关定时拍摄（每10分钟一张）。状态持久化到 data/config.json，服务重启后自动恢复。
+    开启时立即触发一次拍摄。
+    """
+    global _auto_capture_task
+    want_on = enabled == "on"
+    _app_config["auto_capture"] = want_on
+    _save_config()
+
+    # 确保后台任务存在（服务启动时若配置为关则不创建）
+    if _auto_capture_task is None or _auto_capture_task.done():
+        _auto_capture_task = asyncio.create_task(_auto_capture_loop())
+
+    if want_on:
+        # 开启后立即拍一张
+        try:
+            await asyncio.to_thread(_publish_mqtt_trigger)
+            _app_config["last_capture_ts"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _save_config()
+        except Exception as e:
+            print(f"[AutoCapture] 开启后首次拍摄失败: {e}")
+
+    return {"ok": True, "auto_capture": want_on, "last_capture_ts": _app_config.get("last_capture_ts", "")}
+
+@app.get("/api/auto_capture")
+async def get_auto_capture():
+    """查询定时拍摄状态"""
+    return {"auto_capture": _app_config.get("auto_capture", False), "last_capture_ts": _app_config.get("last_capture_ts", "")}
+
+@app.on_event("startup")
+async def _startup_tasks():
+    """服务启动：加载持久化配置；若定时拍摄为开，恢复后台循环"""
+    _load_config()
+    global _auto_capture_task
+    if _app_config.get("auto_capture") and (_auto_capture_task is None or _auto_capture_task.done()):
+        _auto_capture_task = asyncio.create_task(_auto_capture_loop())
 
 # ==========================================
 #  Fix #10: 提取算法实例工厂函数，消除三处重复的实例化代码
@@ -173,14 +275,16 @@ async def get_available_dates():
 @app.get("/api/photos")
 async def get_photos(date: str = Query(..., description="查询日期，格式 YYYY-MM-DD")):
     """
-    返回指定日期的照片列表，文件名格式 photo_YYYYMMDD_HHMMSS[_n].ext
+    返回指定日期的照片列表。
+    照片按日期子目录归档: photos/YYYYMMDD/photo_YYYYMMDD_HHMMSS[_n].ext
     """
     clean_date = date.replace("-", "")
-    if not os.path.isdir(PHOTOS_DIR):
+    date_dir = os.path.join(PHOTOS_DIR, clean_date)
+    if not os.path.isdir(date_dir):
         return []
 
     photos = []
-    for fn in os.listdir(PHOTOS_DIR):
+    for fn in os.listdir(date_dir):
         if not fn.startswith(f"photo_{clean_date}_"):
             continue
         if not fn.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
@@ -194,7 +298,7 @@ async def get_photos(date: str = Query(..., description="查询日期，格式 Y
             "filename": fn,
             "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
             "time": dt.strftime("%H:%M:%S"),
-            "url": f"/photos/{fn}",
+            "url": f"/photos/{clean_date}/{fn}",
         })
 
     photos.sort(key=lambda p: p["timestamp"])
@@ -249,6 +353,7 @@ async def get_history(
     s2_results = []
     s3_results = []
     total_rows = 0
+    _prev_raw = [0, 0, 0]  # 黑名单覆盖用：上一行三个通道的原始值
     
     # 3. 流式解析 CSV 文件并串行喂入算法
     try:
@@ -274,7 +379,10 @@ async def get_history(
                 except (ValueError, KeyError):
                     print(f"[API Warning] 跳过格式错误行: {row}")
                     continue
-                
+
+                # 黑名单原始值覆盖（历史存量坏数据）
+                raw1, raw2, raw3 = _sanitize_raw(raw1, raw2, raw3, _prev_raw)
+
                 # 运行算法
                 pt1 = algo1.process_point(raw1, dt)
                 pt2 = algo2.process_point(raw2, dt)
@@ -375,6 +483,7 @@ async def get_realtime(
             env_window=env_window, env_dry_window_up=env_dry_window_up, env_dry_window_down=env_dry_window_down,
             env_upper_offset=env_upper_offset, env_lower_offset=env_lower_offset,
         )
+        _prev_raw = [0, 0, 0]  # 黑名单覆盖用
 
         import io
         tail_csv = header + "\n" + "".join(tail_lines)
@@ -387,6 +496,9 @@ async def get_realtime(
                 raw1, raw2, raw3 = int(row["sensor1"]), int(row["sensor2"]), int(row["sensor3"])
             except (ValueError, KeyError):
                 continue
+
+            # 黑名单原始值覆盖（历史存量坏数据）
+            raw1, raw2, raw3 = _sanitize_raw(raw1, raw2, raw3, _prev_raw)
 
             pt1 = algo1.process_point(raw1, dt)
             pt2 = algo2.process_point(raw2, dt)
@@ -411,10 +523,11 @@ async def get_realtime(
 #  SSE 实时流式推送接口
 # ==========================================
 
-def _read_csv_rows_from(csv_path: str, byte_offset: int, algo1, algo2, algo3):
+def _read_csv_rows_from(csv_path: str, byte_offset: int, algo1, algo2, algo3, prev_raw: list):
     """
     从 CSV 文件的字节偏移量 byte_offset 处开始读取增量数据，经算法处理后返回结果列表。
     Fix #8: 原实现使用行号跳过（O(N) 逐行遍历），现改为字节偏移量定位，直接 f.seek() 到上次读取结束的位置。
+    prev_raw: 黑名单覆盖用，三个通道上一行原始值（跨调用保持状态）
     返回: (new_byte_offset, new_rows_count, incremental_payload_dict)
     """
     incremental = {
@@ -455,6 +568,9 @@ def _read_csv_rows_from(csv_path: str, byte_offset: int, algo1, algo2, algo3):
                     raw3 = int(row["sensor3"])
                 except (ValueError, KeyError):
                     continue
+
+                # 黑名单原始值覆盖（历史存量坏数据）
+                raw1, raw2, raw3 = _sanitize_raw(raw1, raw2, raw3, prev_raw)
 
                 pt1 = algo1.process_point(raw1, dt)
                 pt2 = algo2.process_point(raw2, dt)
@@ -512,9 +628,10 @@ async def stream_realtime(
         )
 
         sent_byte_offset = 0  # Fix #8: 用字节偏移量替代行号游标
+        _prev_raw = [0, 0, 0]  # 黑名单覆盖用（贯穿整个 SSE 连接）
 
         # --- 阶段1：发送全量历史快照（snapshot 事件）---
-        sent_byte_offset, total_count, snapshot = _read_csv_rows_from(csv_path, 0, algo1, algo2, algo3)
+        sent_byte_offset, total_count, snapshot = _read_csv_rows_from(csv_path, 0, algo1, algo2, algo3, _prev_raw)
         snapshot["type"] = "snapshot"
         yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
 
@@ -536,7 +653,7 @@ async def stream_realtime(
                 csv_path = new_csv_path
                 sent_byte_offset = 0
 
-            sent_byte_offset, new_count, delta = _read_csv_rows_from(csv_path, sent_byte_offset, algo1, algo2, algo3)
+            sent_byte_offset, new_count, delta = _read_csv_rows_from(csv_path, sent_byte_offset, algo1, algo2, algo3, _prev_raw)
 
             if new_count > 0:
                 delta["type"] = "delta"

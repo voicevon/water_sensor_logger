@@ -1,6 +1,16 @@
 from datetime import datetime
 from collections import deque
 
+# ==========================================
+#  黑名单数据集合（原始数据层使用，与算法无关）：
+#  数据入库/读取时，命中黑名单的原始值用上一次的有效值覆盖。
+#  成员：
+#    32767 - 固件按有符号 int16 计算 pf*100 时的饱和钳位值 (0x7FFF)，
+#            通常是 I2C/SPI 读取失败产生的异常读数。
+#  后续发现新的异常值直接加入集合即可。
+# ==========================================
+BAD_VALUES = {32767}
+
 class SensorAlgorithm:
     """
     水位传感器通道核心算法 (Python 版)
@@ -159,7 +169,7 @@ class DiscreteVarianceAlgorithm:
 
     def process_point(self, value: int, timestamp: datetime) -> dict:
         self.raw_value = value
-        
+
         # 1. 基础基线 (Baseline) — O(1)
         if len(self.base_buf) == self.baseline_window:
             self._base_sum -= self.base_buf[0]
@@ -225,7 +235,7 @@ class EnvelopeRangeAlgorithm:
 
     def process_point(self, value: int, timestamp: datetime) -> dict:
         self.raw_value = value
-        
+
         self.buf.append(value)
             
         self.env_upper = max(self.buf)
