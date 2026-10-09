@@ -155,7 +155,7 @@ def _on_sensor_message(msg):
         payload = msg.payload.decode("utf-8")
         data = json.loads(payload)
         
-        # 2. 提取传感器数值（大端序 uint16 物理电容，即 pf * 100）
+        # 2. 提取传感器数值（24 位有符号原生 AD 计数值）
         # 协议规定：sensor1 到 sensor3，以及 state (开关水状态字节)
         # 注意：原始数据如实入库，不做任何修改；黑名单覆盖在算法读取 CSV 时进行
         sensor1 = data.get("sensor1", 0)

@@ -19,7 +19,7 @@ class SensorAlgorithm:
     Fix #4: 所有滑动窗口均改为 collections.deque(maxlen=N) + 增量 sum，
             时间复杂度从 O(N) 降至 O(1)，避免全天百万级运算的性能瓶颈。
     """
-    def __init__(self, sensor_id: int, threshold_offset: int = 50, ma_window: int = 50, baseline_window: int = 200):
+    def __init__(self, sensor_id: int, threshold_offset: int = 3200, ma_window: int = 50, baseline_window: int = 200):
         self.sensor_id = sensor_id
         self.threshold_offset = threshold_offset
         self.ma_window = ma_window
@@ -78,7 +78,7 @@ class SensorAlgorithm:
     def process_point(self, value: int, timestamp: datetime) -> dict:
         """
         处理时间序列上的单点数据。
-        value: 原始电容值 (uint16_t, pf_val * 100)
+        value: 24 位有符号原生 AD 计数值 (int)
         timestamp: datetime 对象
         """
         self.raw_value = value
@@ -214,7 +214,7 @@ class EnvelopeRangeAlgorithm:
     Fix #6: dry_baseline 初始标志从 0.0 改为 None，消除“diff”恰好为 0 时
             初始化不触发的歧义。
     """
-    def __init__(self, sensor_id: int, env_window: int = 30, dry_baseline_window_up: int = 1000, dry_baseline_window_down: int = 1000, upper_offset: int = 500, lower_offset: int = 300):
+    def __init__(self, sensor_id: int, env_window: int = 30, dry_baseline_window_up: int = 1000, dry_baseline_window_down: int = 1000, upper_offset: int = 5000, lower_offset: int = 3000):
         self.sensor_id = sensor_id
         self.env_window = env_window
         self.dry_baseline_window_up = dry_baseline_window_up

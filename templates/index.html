@@ -665,8 +665,8 @@
                 <!-- 动态阈值 参数 -->
                 <div id="param-group-dynamic" class="param-group">
                     <div class="slider-container">
-                        <label>门限偏移量 (Offset) <span class="slider-val" id="offset-val">50</span></label>
-                        <input type="range" id="offset-slider" min="-200" max="200" step="5" value="50" oninput="updateSliderLabel('offset', this.value)" onchange="fetchData()">
+                        <label>门限偏移量 (Offset) <span class="slider-val" id="offset-val">3,200</span></label>
+                        <input type="range" id="offset-slider" min="-50000" max="50000" step="500" value="3200" oninput="updateSliderLabel('offset', this.value)" onchange="fetchData()">
                     </div>
                     <div class="slider-container">
                         <label>均值滤波窗口 (MA Window) <span class="slider-val" id="ma-val">50 秒</span></label>
@@ -689,8 +689,8 @@
                         <input type="range" id="var-ma-slider" min="5" max="150" step="5" value="30" oninput="updateSliderLabel('var-ma', this.value)" onchange="fetchData()">
                     </div>
                     <div class="slider-container">
-                        <label>方差触发阈值 <span class="slider-val" id="var-thresh-val">5</span></label>
-                        <input type="range" id="var-thresh-slider" min="0" max="50" step="0.1" value="5" oninput="updateSliderLabel('var-thresh', this.value)" onchange="fetchData()">
+                        <label>方差触发阈值 <span class="slider-val" id="var-thresh-val">500,000</span></label>
+                        <input type="range" id="var-thresh-slider" min="0" max="5000000" step="10000" value="500000" oninput="updateSliderLabel('var-thresh', this.value)" onchange="fetchData()">
                     </div>
                 </div>
 
@@ -708,12 +708,12 @@
                         <input type="range" id="env-dry-window-down-slider" min="10" max="10000" step="10" value="1000" oninput="updateSliderLabel('env-dry-window-down', this.value)" onchange="fetchData()">
                     </div>
                     <div class="slider-container">
-                        <label>上触发偏移量 <span class="slider-val" id="env-upper-offset-val">500</span></label>
-                        <input type="range" id="env-upper-offset-slider" min="10" max="800" step="10" value="500" oninput="updateSliderLabel('env-upper-offset', this.value)" onchange="fetchData()">
+                        <label>上触发偏移量 <span class="slider-val" id="env-upper-offset-val">5,000</span></label>
+                        <input type="range" id="env-upper-offset-slider" min="100" max="50000" step="500" value="5000" oninput="updateSliderLabel('env-upper-offset', this.value)" onchange="fetchData()">
                     </div>
                     <div class="slider-container">
-                        <label>下触发偏移量 <span class="slider-val" id="env-lower-offset-val">300</span></label>
-                        <input type="range" id="env-lower-offset-slider" min="10" max="800" step="10" value="300" oninput="updateSliderLabel('env-lower-offset', this.value)" onchange="fetchData()">
+                        <label>下触发偏移量 <span class="slider-val" id="env-lower-offset-val">3,000</span></label>
+                        <input type="range" id="env-lower-offset-slider" min="100" max="50000" step="500" value="3000" oninput="updateSliderLabel('env-lower-offset', this.value)" onchange="fetchData()">
                     </div>
                 </div>
             </div>
@@ -1215,7 +1215,7 @@
             const base = document.getElementById('base-slider').value;
             const var_baseline_ma = document.getElementById('var-base-slider').value;
             const var_variance_ma = document.getElementById('var-ma-slider').value;
-            const var_thresh = Math.round(parseFloat(document.getElementById('var-thresh-slider').value) * 100);
+            const var_thresh = parseInt(document.getElementById('var-thresh-slider').value);
             const env_window = document.getElementById('env-window-slider').value;
             const env_dry_window_up = document.getElementById('env-dry-window-up-slider').value;
             const env_dry_window_down = document.getElementById('env-dry-window-down-slider').value;
@@ -1391,8 +1391,9 @@
         //  滑动条文本显示更新
         // ============================================================
         function updateSliderLabel(type, val) {
+            const num = Number(val);
             if (type === 'offset') {
-                document.getElementById('offset-val').innerText = `${val}`;
+                document.getElementById('offset-val').innerText = `${num.toLocaleString()}`;
             } else if (type === 'ma') {
                 document.getElementById('ma-val').innerText = `${val} 秒`;
             } else if (type === 'base') {
@@ -1402,7 +1403,7 @@
             } else if (type === 'var-ma') {
                 document.getElementById('var-ma-val').innerText = `${val} 秒`;
             } else if (type === 'var-thresh') {
-                document.getElementById('var-thresh-val').innerText = `${val}`;
+                document.getElementById('var-thresh-val').innerText = `${num.toLocaleString()}`;
             } else if (type === 'env-window') {
                 document.getElementById('env-window-val').innerText = `${val} 秒`;
             } else if (type === 'env-dry-window-up') {
@@ -1410,9 +1411,9 @@
             } else if (type === 'env-dry-window-down') {
                 document.getElementById('env-dry-window-down-val').innerText = `${val} 秒`;
             } else if (type === 'env-upper-offset') {
-                document.getElementById('env-upper-offset-val').innerText = `${val}`;
+                document.getElementById('env-upper-offset-val').innerText = `${num.toLocaleString()}`;
             } else if (type === 'env-lower-offset') {
-                document.getElementById('env-lower-offset-val').innerText = `${val}`;
+                document.getElementById('env-lower-offset-val').innerText = `${num.toLocaleString()}`;
             }
         }
 
@@ -1475,7 +1476,7 @@
             const base = document.getElementById('base-slider').value;
             const var_baseline_ma = document.getElementById('var-base-slider').value;
             const var_variance_ma = document.getElementById('var-ma-slider').value;
-            const var_thresh = Math.round(parseFloat(document.getElementById('var-thresh-slider').value) * 100);
+            const var_thresh = parseInt(document.getElementById('var-thresh-slider').value);
             const env_window = document.getElementById('env-window-slider').value;
             const env_dry_window_up = document.getElementById('env-dry-window-up-slider').value;
             const env_dry_window_down = document.getElementById('env-dry-window-down-slider').value;
@@ -1535,20 +1536,24 @@
             let yAxisConfigs = [
                 {
                     type: 'value',
-                    name: '电容值 (pF)',
+                    name: '24-bit AD 计数值',
+                    scale: true,
                     axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
-                    axisLabel: { color: '#9ca3af' },
-                    splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
-                    min: function(value) { return Math.floor(value.min - 0.5); },
-                    max: function(value) { return Math.ceil(value.max + 0.5); }
+                    axisLabel: {
+                        color: '#9ca3af',
+                        formatter: function (value) {
+                            return value.toLocaleString();
+                        }
+                    },
+                    splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
                 }
             ];
 
             if (algorithm === "dynamic") {
-                legendData = ['原始电容 (Raw)', '滤波信号 (Filtered)', '环境基准线 (Baseline)', '自适应门限 (Threshold)'];
+                legendData = ['原始值 (Raw)', '滤波信号 (Filtered)', '环境基准线 (Baseline)', '自适应门限 (Threshold)'];
                 seriesConfigs = [
                     {
-                        name: '原始电容 (Raw)',
+                        name: '原始值 (Raw)',
                         type: 'line',
                         data: sensorData.raw,
                         lineStyle: { width: 1, color: 'rgba(255,255,255,0.25)' },
@@ -1586,18 +1591,24 @@
                     }
                 ];
             } else if (algorithm === "discrete") {
-                legendData = ['原始电容 (Raw)', '长效基线 (Baseline)', '平滑方差 (Variance)'];
+                legendData = ['原始值 (Raw)', '长效基线 (Baseline)', '平滑方差 (Variance)'];
                 yAxisConfigs.push({
                     type: 'value',
                     name: '方差幅度',
+                    scale: true,
                     position: 'right',
                     axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
-                    axisLabel: { color: '#fbbf24' },
+                    axisLabel: {
+                        color: '#fbbf24',
+                        formatter: function (value) {
+                            return value.toLocaleString();
+                        }
+                    },
                     splitLine: { show: false }
                 });
                 seriesConfigs = [
                     {
-                        name: '原始电容 (Raw)',
+                        name: '原始值 (Raw)',
                         type: 'line',
                         data: sensorData.raw,
                         lineStyle: { width: 1, color: 'rgba(255,255,255,0.25)' },
@@ -1634,18 +1645,24 @@
                 const upperLimitData = dryBaseline.map(val => +(val + env_upper_val).toFixed(2));
                 const lowerLimitData = dryBaseline.map(val => +(val + env_lower_val).toFixed(2));
                 
-                legendData = ['原始电容 (Raw)', '包络上线 (Upper)', '包络下线 (Lower)', '极差曲线 (Diff)', '无水基准线 (Dry Baseline)', '上触发线 (Upper Trigger)', '下触发线 (Lower Trigger)'];
+                legendData = ['原始值 (Raw)', '包络上线 (Upper)', '包络下线 (Lower)', '极差曲线 (Diff)', '无水基准线 (Dry Baseline)', '上触发线 (Upper Trigger)', '下触发线 (Lower Trigger)'];
                 yAxisConfigs.push({
                     type: 'value',
                     name: '极差值',
+                    scale: true,
                     position: 'right',
                     axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
-                    axisLabel: { color: '#f59e0b' },
+                    axisLabel: {
+                        color: '#f59e0b',
+                        formatter: function (value) {
+                            return value.toLocaleString();
+                        }
+                    },
                     splitLine: { show: false }
                 });
                 seriesConfigs = [
                     {
-                        name: '原始电容 (Raw)',
+                        name: '原始值 (Raw)',
                         type: 'line',
                         data: sensorData.raw,
                         lineStyle: { width: 1, color: 'rgba(255,255,255,0.25)' },
@@ -1745,9 +1762,10 @@
                         let res = `<div style="font-weight:bold;margin-bottom:5px;">${params[0].name}</div>`;
                         params.forEach(item => {
                             let unit = '';
+                            const valStr = typeof item.value === 'number' ? item.value.toLocaleString() : item.value;
                             res += `<div style="display:flex;justify-content:space-between;gap:20px;">
                                         <span>${item.marker} ${item.seriesName}:</span>
-                                        <span style="font-weight:bold;">${item.value}${unit}</span>
+                                        <span style="font-weight:bold;">${valStr}${unit}</span>
                                     </div>`;
                         });
                         const dataIndex = params[0].dataIndex;
@@ -1880,10 +1898,10 @@
             // Math.max(...bigArray) 展开运算符在数组超过 ~10万元素时可能超过调用栈限制，抛出 RangeError
             const maxRaw = sensorData.raw.reduce((a, b) => Math.max(a, b), -Infinity);
             const minRaw = sensorData.raw.reduce((a, b) => Math.min(a, b), Infinity);
-            rawRange.innerText = `${minRaw} - ${maxRaw}`;
+            rawRange.innerText = (minRaw === Infinity || maxRaw === -Infinity) ? "--" : `${minRaw.toLocaleString()} ~ ${maxRaw.toLocaleString()}`;
 
             const maxFiltered = sensorData.filtered.reduce((a, b) => Math.max(a, b), -Infinity);
-            filteredMax.innerText = `${maxFiltered}`;
+            filteredMax.innerText = (maxFiltered === -Infinity) ? "--" : `${maxFiltered.toLocaleString()}`;
 
             ptsCount.innerText = `${sensorData.raw.length} 秒`;
 

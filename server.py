@@ -25,8 +25,10 @@ def _sanitize_raw(r1: int, r2: int, r3: int, prev: list) -> tuple:
     vals = [r1, r2, r3]
     for i, v in enumerate(vals):
         if v in BAD_VALUES:
-            vals[i] = prev[i]
-        prev[i] = vals[i]
+            if prev[i] is not None and prev[i] != 0:
+                vals[i] = prev[i]
+        else:
+            prev[i] = vals[i]
     return vals[0], vals[1], vals[2]
 
 # Fix #9: 收紧 CORS 配置，仅允许本地开发环境访问，生产环境应进一步限制为实际部署域名
@@ -115,6 +117,7 @@ def _publish_mqtt_trigger(motion_flag: str = "off"):
         raise TimeoutError("MQTT 发布确认超时")
     return payload
 
+@app.post("/api/capture")
 async def trigger_capture(motion: str = Query("off", description="异物侵入检测开关: on/off")):
     """
     发送 MQTT 指令触发相机拍摄一张照片。
@@ -207,17 +210,17 @@ async def _startup_tasks():
 # ==========================================
 def _create_algo_instances(
     algorithm: str,
-    threshold_offset: int = 50,
+    threshold_offset: int = 3200,
     ma_window: int = 50,
     baseline_window: int = 200,
     var_baseline_ma: int = 200,
     var_variance_ma: int = 30,
-    var_threshold: int = 5000,
+    var_threshold: int = 500000,
     env_window: int = 30,
     env_dry_window_up: int = 1000,
     env_dry_window_down: int = 1000,
-    env_upper_offset: int = 500,
-    env_lower_offset: int = 300,
+    env_upper_offset: int = 5000,
+    env_lower_offset: int = 3000,
 ) -> tuple:
     """
     根据算法名称和参数创建三个传感器通道的算法实例。
@@ -308,17 +311,17 @@ async def get_photos(date: str = Query(..., description="查询日期，格式 Y
 async def get_history(
     date: str = Query(..., description="查询日期，格式 YYYY-MM-DD"),
     algorithm: str = Query("dynamic", description="算法选择"),
-    threshold_offset: int = Query(50, description="门限偏移量"),
+    threshold_offset: int = Query(3200, description="门限偏移量"),
     ma_window: int = Query(50, description="均值滤波窗口大小"),
     baseline_window: int = Query(200, description="基准线窗口大小"),
     var_baseline_ma: int = Query(200, description="基线均值窗口"),
     var_variance_ma: int = Query(30, description="方差平滑窗口"),
-    var_threshold: int = Query(5000, description="方差触发阈值"),
+    var_threshold: int = Query(500000, description="方差触发阈值"),
     env_window: int = Query(30, description="包络窗口大小"),
     env_dry_window_up: int = Query(1000, description="无水基准线上升窗口"),
     env_dry_window_down: int = Query(1000, description="无水基准线下降窗口"),
-    env_upper_offset: int = Query(500, description="上触发相对偏置"),
-    env_lower_offset: int = Query(300, description="下触发相对偏置"),
+    env_upper_offset: int = Query(5000, description="上触发相对偏置"),
+    env_lower_offset: int = Query(3000, description="下触发相对偏置"),
     downsample: int = Query(1, ge=1, description="数据降采样比例 (每N个点取一个)")
 ):
     """
@@ -409,11 +412,11 @@ async def get_history(
         sampled_s2 = s2_results
         sampled_s3 = s3_results
         
-    # 5. 打包封装返回数据 (电容值除以 100 恢复为物理 pF)
+    # 5. 打包封装返回数据（24位原生 AD 码值）
     response_data["timestamps"] = sampled_timestamps
     response_data["total_rows"] = total_rows
     
-    # 辅助转换函数，将算法整数值转为浮点数 pF
+    # 辅助填充函数，将算法整数值打包入对应通道
     def fill_channel_data(ch_dict, results_list):
         ch_dict["raw"] = [r["raw"] for r in results_list]
         ch_dict["filtered"] = [r["filtered"] for r in results_list]
@@ -430,17 +433,17 @@ async def get_history(
 @app.get("/api/realtime")
 async def get_realtime(
     algorithm: str = Query("dynamic"),
-    threshold_offset: int = Query(50),
+    threshold_offset: int = Query(3200),
     ma_window: int = Query(50),
     baseline_window: int = Query(200),
     var_baseline_ma: int = Query(200),
     var_variance_ma: int = Query(30),
-    var_threshold: int = Query(5000),
+    var_threshold: int = Query(500000),
     env_window: int = Query(30),
     env_dry_window_up: int = Query(1000),
     env_dry_window_down: int = Query(1000),
-    env_upper_offset: int = Query(500),
-    env_lower_offset: int = Query(300)
+    env_upper_offset: int = Query(5000),
+    env_lower_offset: int = Query(3000)
 ):
     """
     实时曲线接口：返回当天最新的 limit 条数据。
@@ -596,17 +599,17 @@ def _read_csv_rows_from(csv_path: str, byte_offset: int, algo1, algo2, algo3, pr
 async def stream_realtime(
     request: Request,
     algorithm: str = Query("dynamic"),
-    threshold_offset: int = Query(50),
+    threshold_offset: int = Query(3200),
     ma_window: int = Query(50),
     baseline_window: int = Query(200),
     var_baseline_ma: int = Query(200),
     var_variance_ma: int = Query(30),
-    var_threshold: int = Query(5000),
+    var_threshold: int = Query(500000),
     env_window: int = Query(30),
     env_dry_window_up: int = Query(1000),
     env_dry_window_down: int = Query(1000),
-    env_upper_offset: int = Query(500),
-    env_lower_offset: int = Query(300),
+    env_upper_offset: int = Query(5000),
+    env_lower_offset: int = Query(3000),
     poll_interval: float = Query(1.0, description="推送间隔秒数，默认 1 秒")
 ):
     """
