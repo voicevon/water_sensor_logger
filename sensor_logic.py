@@ -5,11 +5,11 @@ from collections import deque
 #  黑名单数据集合（原始数据层使用，与算法无关）：
 #  数据入库/读取时，命中黑名单的原始值用上一次的有效值覆盖。
 #  成员：
-#    32767 - 固件按有符号 int16 计算 pf*100 时的饱和钳位值 (0x7FFF)，
-#            通常是 I2C/SPI 读取失败产生的异常读数。
+#    8388607 - 24 位有符号正向饱和钳位值 (0x7FFFFF)
+#   -8388608 - 24 位有符号负向饱和钳位值 (-0x800000)
 #  后续发现新的异常值直接加入集合即可。
 # ==========================================
-BAD_VALUES = {32767}
+BAD_VALUES = {8388607, -8388608}
 
 class SensorAlgorithm:
     """
@@ -148,7 +148,7 @@ class DiscreteVarianceAlgorithm:
 
     Fix #4: base_buf / var_buf 同步改为 deque(maxlen) + 增量 sum。
     """
-    def __init__(self, sensor_id: int, baseline_ma: int = 200, variance_ma: int = 30, var_threshold: int = 50):
+    def __init__(self, sensor_id: int, baseline_ma: int = 200, variance_ma: int = 30, var_threshold: int = 500000):
         self.sensor_id = sensor_id
         self.baseline_window = baseline_ma
         self.variance_window = variance_ma
