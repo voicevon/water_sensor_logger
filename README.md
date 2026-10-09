@@ -59,11 +59,13 @@ water_sensor_logger/
 ├── doc/                        # 项目设计与架构文档
 │   ├── 2026-07-10-water-logger-design.md
 │   └── implementation_plan.md
-├── templates/                  # 前端模板
-│   └── index.html              # ECharts 数据分析与动态调参控制台
-├── logger.py                   # 后台数据采集与图片接收守护进程
-├── server.py                   # FastAPI 分析与可视化 Web 服务端
-├── sensor_logic.py             # 核心滤波、基准线追踪与状态机算法引擎
+├── src/                        # 核心源代码与 Web 模板
+│   ├── __init__.py             # Python 包初始化声明
+│   ├── logger.py               # 后台数据采集与图片接收守护进程
+│   ├── server.py               # FastAPI 分析与可视化 Web 服务端
+│   ├── sensor_logic.py         # 核心滤波、基准线追踪与状态机算法引擎
+│   └── templates/              # 前端模板
+│       └── index.html          # ECharts 数据分析与动态调参控制台
 ├── requirements.txt            # Python 依赖清单
 ├── run.bat                     # Windows 一键并发启动脚本
 └── README.md                   # 项目工程说明文档
@@ -106,13 +108,13 @@ run.bat
 
 **步骤 1：启动后台采集器**
 ```bash
-python logger.py
+python src/logger.py
 ```
 *控制台将打印连接成功信息，自动向 `water/sensor/start` 发送采样激活指令，并开始将接收到的数据写入 `data/data_YYYYMMDD.csv`。*
 
 **步骤 2：启动分析 Web 服务**
 ```bash
-python server.py
+python src/server.py
 ```
 *服务默认启动于 `http://127.0.0.1:8000`。*
 

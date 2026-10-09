@@ -14,19 +14,31 @@ MQTT_USERNAME     = "von"                    # MQTT 用户名
 MQTT_PASSWORD     = "von123456"              # MQTT 密码
 MQTT_TOPIC        = "water/sensor/status"    # 数据订阅主题
 MQTT_CAMERA_TOPIC = "water/photo/status/dongzhan"  # 照片订阅主题
-DATA_DIR          = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+ROOT_DIR          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR          = os.path.join(ROOT_DIR, "data")
 PHOTOS_DIR        = os.path.join(DATA_DIR, "photos")
+CONFIG_FILE       = os.path.join(DATA_DIR, "config.json")
 
-# ------------------------------------------
-#  站点业务配置（Fix #2：原先硬编码在 on_connect 回调里）
-# ------------------------------------------
-STATION_NAME    = "dongzhan"  # 站点名称，部署到新站点时在此修改
-SAMPLE_INTERVAL = 1           # 传感器采样间隔（秒）
+def load_config():
+    """从 data/config.json 读取站点名称与业务配置"""
+    cfg = {"station_name": "dongzhan", "sample_interval": 1}
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg.update(json.load(f))
+    except Exception as e:
+        print(f"[Config] 读取配置失败: {e}")
+    return cfg
+
+_init_cfg = load_config()
+STATION_NAME    = _init_cfg.get("station_name", "dongzhan")
+SAMPLE_INTERVAL = int(_init_cfg.get("sample_interval", 1))
 
 print(f"==================================================")
 print(f"  Water Logger 采集服务已启动")
+print(f"  配置站点名称: {STATION_NAME} (可通过 data/config.json 配置)")
+print(f"  传感器采样间隔: {SAMPLE_INTERVAL} 秒")
 print(f"  订阅主题: {MQTT_TOPIC}")
-print(f"  照片主题: {MQTT_CAMERA_TOPIC}")
 print(f"  数据存储路径: {DATA_DIR}")
 print(f"  照片存储路径: {PHOTOS_DIR}")
 print(f"==================================================")
@@ -41,14 +53,22 @@ def on_connect(client, userdata, flags, reason_code, properties):
     reason_code == 0 表示连接成功
     """
     if reason_code == 0:
+        cfg = load_config()
+        station = cfg.get("station_name", "dongzhan")
+        interval = int(cfg.get("sample_interval", 1))
+
         print("[MQTT] 成功连接至 MQTT Broker!")
         client.subscribe(MQTT_TOPIC)
         print(f"[MQTT] 已成功订阅主题: {MQTT_TOPIC}")
-        client.subscribe(MQTT_CAMERA_TOPIC)
-        print(f"[MQTT] 已成功订阅照片主题: {MQTT_CAMERA_TOPIC}")
+
+        # 订阅指定站点照片及通配主题
+        camera_topic = f"water/photo/status/{station}"
+        client.subscribe(camera_topic)
+        client.subscribe("water/photo/status/+")
+        print(f"[MQTT] 已成功订阅照片主题: {camera_topic} 与 water/photo/status/+")
         
         # 自动发布启动指令，触发传感器上报数据
-        trigger_payload = json.dumps({"name": STATION_NAME, "interval": SAMPLE_INTERVAL})
+        trigger_payload = json.dumps({"name": station, "interval": interval})
         client.publish("water/sensor/start", trigger_payload, qos=2)
         print(f"[MQTT] 已自动发送触发指令至 water/sensor/start: {trigger_payload}")
     else:

@@ -1,4 +1,5 @@
 import os
+import sys
 import csv
 import io
 import json
@@ -13,6 +14,8 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import paho.mqtt.client as mqtt
 
+# 保证无论从何处执行，src/ 目录均优先导入
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sensor_logic import SensorAlgorithm, DiscreteVarianceAlgorithm, EnvelopeRangeAlgorithm, BAD_VALUES
 
 app = FastAPI(title="Water Logger Analysis Server")
@@ -43,10 +46,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SRC_DIR)
+DATA_DIR = os.path.join(ROOT_DIR, "data")
 PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+TEMPLATES_DIR = os.path.join(SRC_DIR, "templates")
 
 # 确保模板文件夹存在
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
@@ -64,12 +68,15 @@ MQTT_PORT            = 1883
 MQTT_USERNAME        = "von"
 MQTT_PASSWORD        = "von123456"
 CAMERA_TRIGGER_TOPIC = "water/photo/take"     # 相机拍摄触发主题（QoS 0）
-STATION_NAME         = "dongzhan"             # 站点名称，部署到新站点时在此修改
-
-CONFIG_FILE          = os.path.join(DATA_DIR, "config.json")  # 定时拍摄等配置持久化
+CONFIG_FILE          = os.path.join(DATA_DIR, "config.json")  # 站点名称、定时拍摄等配置持久化
 AUTO_CAPTURE_INTERVAL = 10 * 60               # 定时拍摄间隔（秒）
 
-_app_config = {"auto_capture": False, "last_capture_ts": ""}
+_app_config = {
+    "station_name": "dongzhan",
+    "sample_interval": 1,
+    "auto_capture": False,
+    "last_capture_ts": ""
+}
 _auto_capture_task = None
 
 def _load_config():
@@ -88,6 +95,29 @@ def _save_config():
     except Exception as e:
         print(f"[Config] 保存配置失败: {e}")
 
+def _publish_sensor_start(station_name: str, interval: int = 1):
+    """向 water/sensor/start 发布激活指令"""
+    client_id = f"water_start_pub_{uuid.uuid4().hex[:8]}"
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, clean_session=True)
+    except AttributeError:
+        client = mqtt.Client(client_id=client_id, clean_session=True)
+    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    client.connect(MQTT_BROKER, MQTT_PORT, keepalive=30)
+    client.loop_start()
+
+    payload = json.dumps({"name": station_name, "interval": interval})
+    info = client.publish("water/sensor/start", payload, qos=2)
+    deadline = time.time() + 3
+    while not info.is_published() and time.time() < deadline:
+        time.sleep(0.05)
+    published = info.is_published()
+    client.loop_stop()
+    client.disconnect()
+    if not published:
+        raise TimeoutError("MQTT 发布确认超时")
+    return payload
+
 def _publish_mqtt_trigger(motion_flag: str = "off"):
     """同步发布拍摄指令（短连接，在独立线程中调用）"""
     client_id = f"water_capture_req_{uuid.uuid4().hex[:8]}"
@@ -100,8 +130,9 @@ def _publish_mqtt_trigger(motion_flag: str = "off"):
     # 必须启动网络循环，消息才会真正发出
     client.loop_start()
 
+    current_station = _app_config.get("station_name", "dongzhan")
     payload = json.dumps({
-        "site_name": STATION_NAME,
+        "site_name": current_station,
         "action": "capture",
         "motion": motion_flag,
     })
@@ -196,6 +227,37 @@ async def set_auto_capture(enabled: str = Query(..., description="on/off")):
 async def get_auto_capture():
     """查询定时拍摄状态"""
     return {"auto_capture": _app_config.get("auto_capture", False), "last_capture_ts": _app_config.get("last_capture_ts", "")}
+
+@app.get("/api/station_config")
+async def get_station_config():
+    """查询站点业务配置（数据来源 data/config.json）"""
+    _load_config()
+    return {
+        "station_name": _app_config.get("station_name", "dongzhan"),
+        "sample_interval": int(_app_config.get("sample_interval", 1))
+    }
+
+@app.post("/api/station_config")
+async def update_station_config(request: Request):
+    """更新站点名称并下发 MQTT 激活指令"""
+    global _app_config
+    body = await request.json()
+    new_station = body.get("station_name", "").strip()
+    new_interval = int(body.get("sample_interval", 1))
+    if not new_station:
+        return {"ok": False, "error": "站点名称不能为空"}
+
+    _app_config["station_name"] = new_station
+    _app_config["sample_interval"] = new_interval
+    _save_config()
+
+    try:
+        payload = await asyncio.to_thread(_publish_sensor_start, new_station, new_interval)
+        print(f"[Config] 已激活新站点传感器: {payload}")
+        return {"ok": True, "station_name": new_station, "sample_interval": new_interval, "payload": payload}
+    except Exception as e:
+        print(f"[Config] 保存成功但下发启动指令异常: {e}")
+        return {"ok": True, "station_name": new_station, "sample_interval": new_interval, "warning": str(e)}
 
 @app.on_event("startup")
 async def _startup_tasks():

@@ -408,11 +408,84 @@
             min-height: 500px;
         }
 
+        /* 图表卡片顶部控制栏 */
+        .chart-top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            z-index: 10;
+            position: relative;
+        }
+
+        .chart-card-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chart-top-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .chart-pill-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-muted);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            user-select: none;
+        }
+
+        .chart-pill-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .chart-pill-btn.active {
+            background: rgba(6, 182, 212, 0.15);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+        }
+
+        .chart-pill-btn.scrolling {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+        }
+
+        .chart-pill-btn.locked {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: var(--accent-orange);
+            color: var(--accent-orange);
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+        }
+
+        .chart-pill-btn.off {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+            opacity: 0.75;
+        }
+
         /* 实时追加计数器 */
         .live-badge {
-            position: absolute;
-            top: 20px;
-            right: 24px;
             display: none;
             align-items: center;
             gap: 6px;
@@ -598,6 +671,21 @@
             font-size: 0.95rem;
             font-family: 'Outfit', sans-serif;
         }
+
+        /* 顶部站点指示牌 */
+        .station-tag {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(6, 182, 212, 0.12);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 10px;
+            padding: 6px 12px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            font-family: 'Outfit', monospace;
+        }
     </style>
 </head>
 <body>
@@ -605,6 +693,11 @@
     <header>
         <h1><span>💧</span> Water Logger 传感器数据诊断仪表盘</h1>
         <div class="header-right">
+            <!-- 当前激活站点指示牌 -->
+            <div class="station-tag" id="station-tag" title="当前激活的监测站点（可在侧边栏修改）">
+                <span>📍</span>
+                <span id="current-station-name">dongzhan</span>
+            </div>
             <!-- 定时拍摄开关：每10分钟自动拍摄一张 -->
             <label class="auto-capture-toggle" id="auto-capture-toggle" onclick="toggleAutoCapture()">
                 <div class="switch">
@@ -640,6 +733,16 @@
                     <button class="tab-btn" onclick="switchChannel(2)">碳源</button>
                     <button class="tab-btn" onclick="switchChannel(3)">铁盐</button>
                 </div>
+            </div>
+
+            <div class="control-group">
+                <div class="section-title">监测站点配置</div>
+                <label for="station-name-input">站点标识 (Station Name)</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="station-name-input" value="dongzhan" style="flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: #fff; padding: 7px 10px; border-radius: 8px; font-size: 0.85rem;" placeholder="如 dongzhan">
+                    <button class="apply-btn" id="btn-save-station" style="width: auto; padding: 7px 12px; margin-top: 0; white-space: nowrap; font-size: 0.82rem;" onclick="saveStationConfig()">更新激活</button>
+                </div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">保存至 data/config.json 并下发 MQTT 激活指令</div>
             </div>
 
             <div class="control-group">
@@ -719,6 +822,42 @@
             </div>
 
             <div class="control-group">
+                <div class="section-title">图表与坐标轴控制</div>
+                <div class="slider-container" style="flex-direction: row; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-weight: 600; font-size: 0.85rem;">X轴自动滚屏</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);" id="sidebar-x-desc">关: 左侧固定全景压缩</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="sidebar-x-scroll-toggle" onchange="setAutoScroll(this.checked)">
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+
+                <div class="slider-container" style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 10px;">
+                    <div>
+                        <div style="font-weight: 600; font-size: 0.85rem;">锁定 Y 轴比例尺</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);" id="sidebar-y-desc">关: 随数据自适应</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="sidebar-y-lock-toggle" onchange="setYScaleLock(this.checked)">
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+
+                <div class="slider-container" style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 10px;">
+                    <div>
+                        <div style="font-weight: 600; font-size: 0.85rem;">图表显示图片</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);" id="sidebar-photo-desc">开: 曲线上标记现场抓拍照片</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="sidebar-photo-toggle" checked onchange="setShowChartPhotos(this.checked)">
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="control-group">
                 <div class="section-title">渲染选项</div>
                 <label for="downsample-select">降采样频率 (优化卡顿)</label>
                 <select id="downsample-select" onchange="fetchData()">
@@ -735,10 +874,36 @@
         <!-- 右侧图表分析区域 -->
         <div class="content-area">
             <div class="chart-card" id="chart-card">
-                <!-- 实时追加角标 -->
-                <div class="live-badge" id="live-badge">
-                    <span class="blink-dot"></span>
-                    <span id="live-count-text">LIVE · +0 pts</span>
+                <!-- 图表顶部控制栏 -->
+                <div class="chart-top-bar">
+                    <div class="chart-top-left">
+                        <span class="chart-card-title">📈 运行曲线推演</span>
+                    </div>
+                    <div class="chart-top-actions">
+                        <!-- 实时追加角标 -->
+                        <div class="live-badge" id="live-badge">
+                            <span class="blink-dot"></span>
+                            <span id="live-count-text">LIVE · +0 pts</span>
+                        </div>
+
+                        <!-- X轴滚屏模式切换按钮 -->
+                        <button class="chart-pill-btn active" id="btn-x-scroll" onclick="toggleAutoScroll()" title="点击切换 X 轴模式：左侧固定全景压缩 vs 窗口自动滚屏">
+                            <span class="pill-icon">↔️</span>
+                            <span class="pill-text" id="btn-x-scroll-text">左侧固定(全景压缩)</span>
+                        </button>
+
+                        <!-- Y轴比例尺锁定按钮 -->
+                        <button class="chart-pill-btn" id="btn-y-scale" onclick="toggleYScaleLock()" title="点击切换 Y 轴比例尺：自适应 vs 锁定当前刻度">
+                            <span class="pill-icon" id="btn-y-scale-icon">🔓</span>
+                            <span class="pill-text" id="btn-y-scale-text">Y轴自适应</span>
+                        </button>
+
+                        <!-- 显示/隐藏图表图片标记按钮 -->
+                        <button class="chart-pill-btn active" id="btn-toggle-photos" onclick="toggleChartPhotos()" title="点击切换图表上是否显示现场照片标记">
+                            <span class="pill-icon" id="btn-toggle-photos-icon">📷</span>
+                            <span class="pill-text" id="btn-toggle-photos-text">图表照片: 显示</span>
+                        </button>
+                    </div>
                 </div>
                 <div id="chart"></div>
             </div>
@@ -811,6 +976,182 @@
         let photoPollTimer = null;   // 实时模式下的照片轮询定时器
 
         // ============================================================
+        //  X 轴滚屏与 Y 轴比例尺状态管理
+        // ============================================================
+        let autoScrollX = false;       // 默认 false：左侧固定全景压缩；true：自动滚屏追踪最新300点
+        let isYScaleLocked = false;    // 默认 false：Y 轴自适应缩放；true：锁定固定比例
+        let lockedYMin = null;         // 锁定时记录的 Y 轴下界
+        let lockedYMax = null;         // 锁定时记录的 Y 轴上界
+        let showChartPhotos = true;    // 默认 true：图表上显示现场抓拍照片标记
+
+        function setAutoScroll(enabled) {
+            autoScrollX = !!enabled;
+            updateScrollUI();
+            saveConfig();
+            
+            // 如果已有图表，立即刷新视图
+            if (myChart) {
+                const option = myChart.getOption();
+                const totalLen = (option.xAxis && option.xAxis[0].data) ? option.xAxis[0].data.length : 0;
+                autoScrollDataZoom(totalLen);
+            }
+        }
+
+        function toggleAutoScroll() {
+            setAutoScroll(!autoScrollX);
+        }
+
+        function updateScrollUI() {
+            const btn = document.getElementById('btn-x-scroll');
+            const text = document.getElementById('btn-x-scroll-text');
+            const toggle = document.getElementById('sidebar-x-scroll-toggle');
+            const desc = document.getElementById('sidebar-x-desc');
+
+            if (autoScrollX) {
+                if (btn) {
+                    btn.classList.remove('active');
+                    btn.classList.add('scrolling');
+                }
+                if (text) text.innerText = 'X轴自动滚屏(300点)';
+                if (toggle) toggle.checked = true;
+                if (desc) desc.innerText = '开: 追踪最新300点';
+            } else {
+                if (btn) {
+                    btn.classList.add('active');
+                    btn.classList.remove('scrolling');
+                }
+                if (text) text.innerText = '左侧固定(全景压缩)';
+                if (toggle) toggle.checked = false;
+                if (desc) desc.innerText = '关: 左侧固定全景压缩';
+            }
+        }
+
+        function setYScaleLock(locked) {
+            isYScaleLocked = !!locked;
+            if (isYScaleLocked) {
+                lockCurrentYBounds();
+            } else {
+                lockedYMin = null;
+                lockedYMax = null;
+            }
+            updateYScaleUI();
+            saveConfig();
+            applyYScaleToChart();
+        }
+
+        function toggleYScaleLock() {
+            setYScaleLock(!isYScaleLocked);
+        }
+
+        function lockCurrentYBounds() {
+            const data = isLiveMode && liveData ? liveData : cachedData;
+            if (!data) return;
+            const sd = data[`sensor${currentChannel}`];
+            if (!sd) return;
+            
+            const all = [];
+            if (sd.raw && sd.raw.length) all.push(...sd.raw);
+            if (sd.filtered && sd.filtered.length) all.push(...sd.filtered);
+            if (sd.baseline && sd.baseline.length) all.push(...sd.baseline);
+            
+            if (all.length === 0) return;
+            const minVal = all.reduce((a, b) => Math.min(a, b), Infinity);
+            const maxVal = all.reduce((a, b) => Math.max(a, b), -Infinity);
+            const span = Math.max(maxVal - minVal, 1000);
+            lockedYMin = Math.floor(minVal - span * 0.05);
+            lockedYMax = Math.ceil(maxVal + span * 0.05);
+        }
+
+        function applyYScaleToChart() {
+            if (!myChart) return;
+            if (isYScaleLocked && lockedYMin !== null && lockedYMax !== null) {
+                myChart.setOption({
+                    yAxis: [
+                        {
+                            scale: false,
+                            min: lockedYMin,
+                            max: lockedYMax
+                        }
+                    ]
+                }, false);
+            } else {
+                myChart.setOption({
+                    yAxis: [
+                        {
+                            scale: true,
+                            min: null,
+                            max: null
+                        }
+                    ]
+                }, false);
+            }
+        }
+
+        function updateYScaleUI() {
+            const btn = document.getElementById('btn-y-scale');
+            const icon = document.getElementById('btn-y-scale-icon');
+            const text = document.getElementById('btn-y-scale-text');
+            const toggle = document.getElementById('sidebar-y-lock-toggle');
+            const desc = document.getElementById('sidebar-y-desc');
+
+            if (isYScaleLocked) {
+                if (btn) btn.classList.add('locked');
+                if (icon) icon.innerText = '🔒';
+                if (text) text.innerText = lockedYMin !== null ? `Y轴已锁定 (${lockedYMin.toLocaleString()} ~ ${lockedYMax.toLocaleString()})` : 'Y轴已锁定';
+                if (toggle) toggle.checked = true;
+                if (desc) desc.innerText = lockedYMin !== null ? `开: [${lockedYMin.toLocaleString()} ~ ${lockedYMax.toLocaleString()}]` : '开: 锁定当前刻度';
+            } else {
+                if (btn) btn.classList.remove('locked');
+                if (icon) icon.innerText = '🔓';
+                if (text) text.innerText = 'Y轴自适应';
+                if (toggle) toggle.checked = false;
+                if (desc) desc.innerText = '关: 随数据自适应';
+            }
+        }
+
+        // ============================================================
+        //  图表照片显示控制
+        // ============================================================
+        function setShowChartPhotos(enabled) {
+            showChartPhotos = !!enabled;
+            updatePhotoToggleUI();
+            saveConfig();
+            refreshPhotoMarks();
+        }
+
+        function toggleChartPhotos() {
+            setShowChartPhotos(!showChartPhotos);
+        }
+
+        function updatePhotoToggleUI() {
+            const btn = document.getElementById('btn-toggle-photos');
+            const icon = document.getElementById('btn-toggle-photos-icon');
+            const text = document.getElementById('btn-toggle-photos-text');
+            const toggle = document.getElementById('sidebar-photo-toggle');
+            const desc = document.getElementById('sidebar-photo-desc');
+
+            if (showChartPhotos) {
+                if (btn) {
+                    btn.classList.add('active');
+                    btn.classList.remove('off');
+                }
+                if (icon) icon.innerText = '📷';
+                if (text) text.innerText = '图表照片: 显示';
+                if (toggle) toggle.checked = true;
+                if (desc) desc.innerText = '开: 曲线上标记现场抓拍照片';
+            } else {
+                if (btn) {
+                    btn.classList.remove('active');
+                    btn.classList.add('off');
+                }
+                if (icon) icon.innerText = '🚫';
+                if (text) text.innerText = '图表照片: 隐藏';
+                if (toggle) toggle.checked = false;
+                if (desc) desc.innerText = '关: 纯曲线无照片干扰';
+            }
+        }
+
+        // ============================================================
         //  配置本地记忆 (localStorage)
         // ============================================================
         function saveConfig() {
@@ -819,6 +1160,11 @@
                 date: document.getElementById('date-select').value,
                 algo: document.getElementById('algo-select').value,
                 downsample: document.getElementById('downsample-select').value,
+                auto_scroll_x: autoScrollX,
+                y_scale_locked: isYScaleLocked,
+                locked_y_min: lockedYMin,
+                locked_y_max: lockedYMax,
+                show_chart_photos: showChartPhotos,
                 params: {
                     offset: document.getElementById('offset-slider').value,
                     ma: document.getElementById('ma-slider').value,
@@ -838,6 +1184,9 @@
 
         function loadConfig() {
             try {
+                updateScrollUI();
+                updateYScaleUI();
+                updatePhotoToggleUI();
                 const saved = localStorage.getItem('water_logger_config');
                 if (!saved) return;
                 const config = JSON.parse(saved);
@@ -870,6 +1219,21 @@
                     document.getElementById('downsample-select').value = config.downsample;
                 }
 
+                if (config.auto_scroll_x !== undefined) {
+                    autoScrollX = !!config.auto_scroll_x;
+                }
+                if (config.y_scale_locked !== undefined) {
+                    isYScaleLocked = !!config.y_scale_locked;
+                    lockedYMin = config.locked_y_min !== undefined ? config.locked_y_min : null;
+                    lockedYMax = config.locked_y_max !== undefined ? config.locked_y_max : null;
+                }
+                if (config.show_chart_photos !== undefined) {
+                    showChartPhotos = !!config.show_chart_photos;
+                }
+                updateScrollUI();
+                updateYScaleUI();
+                updatePhotoToggleUI();
+
                 if (config.params) {
                     const p = config.params;
                     // Fix #15: 对每个字段做存在性检查，防止旧版本 localStorage 配置缺少新字段
@@ -898,11 +1262,67 @@
         }
 
         // ============================================================
+        //  站点配置 (Station Config)
+        // ============================================================
+        async function fetchStationConfig() {
+            try {
+                const res = await fetch('/api/station_config');
+                const data = await res.json();
+                if (data && data.station_name) {
+                    const stName = data.station_name;
+                    const stInput = document.getElementById('station-name-input');
+                    const stBadge = document.getElementById('current-station-name');
+                    if (stInput) stInput.value = stName;
+                    if (stBadge) stBadge.innerText = stName;
+                }
+            } catch (err) {
+                console.error("加载站点配置失败:", err);
+            }
+        }
+
+        async function saveStationConfig() {
+            const stInput = document.getElementById('station-name-input');
+            const btn = document.getElementById('btn-save-station');
+            const val = stInput ? stInput.value.trim() : '';
+            if (!val) {
+                alert("站点名称不能为空");
+                return;
+            }
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = "下发中...";
+            }
+            try {
+                const res = await fetch('/api/station_config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ station_name: val, sample_interval: 1 })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    const stBadge = document.getElementById('current-station-name');
+                    if (stBadge) stBadge.innerText = data.station_name;
+                    alert(`✅ 站点已更新为 [${data.station_name}]，并已向 water/sensor/start 下发激活指令！`);
+                } else {
+                    alert(`❌ 更新失败: ${data.error || '未知错误'}`);
+                }
+            } catch (err) {
+                alert(`❌ 网络请求失败: ${err.message}`);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = "更新激活";
+                }
+            }
+        }
+
+        // ============================================================
         //  初始化
         // ============================================================
         window.addEventListener('DOMContentLoaded', async () => {
             initChart();
             await fetchDates();
+            await fetchStationConfig();
             loadConfig();
             await fetchData();
 
@@ -984,7 +1404,7 @@
          * 生成照片在曲线上的标记点（二分查找最近的时间戳，贴在原始值曲线上）
          */
         function buildPhotoMarks(sensorData, timestamps) {
-            if (!allPhotos.length || !sensorData || !timestamps || !timestamps.length) return [];
+            if (!showChartPhotos || !allPhotos.length || !sensorData || !timestamps || !timestamps.length) return [];
             const marks = [];
             for (const p of allPhotos) {
                 const t = photoToMs(p.timestamp);
@@ -1012,12 +1432,14 @@
          */
         function refreshPhotoMarks() {
             if (!myChart) return;
+            // 先清空，保证彻底清除已有照片标记
+            myChart.setOption({ series: [{ markPoint: { data: [] } }] }, false);
+            if (!showChartPhotos) return;
+
             const data = isLiveMode ? liveData : cachedData;
             if (!data) return;
             const sensorData = data[`sensor${currentChannel}`];
             const marks = buildPhotoMarks(sensorData, data.timestamps);
-            // 先清空再设置，保证移除已消失的照片标记
-            myChart.setOption({ series: [{ markPoint: { data: [] } }] }, false);
             if (marks.length) {
                 myChart.setOption({
                     series: [{
@@ -1363,11 +1785,33 @@
         }
 
         /**
-         * 实时模式下自动把 dataZoom 滑块定位到最新区域（最后 300 个点）
+         * 实时模式下维护 dataZoom 滑块
+         * - 若 autoScrollX 为 false（左侧固定/全景压缩）：保持 start = 0, end = 100，数据点随时间在 X 轴压缩
+         * - 若 autoScrollX 为 true（自动滚屏）：保持追踪最后 300 个点
          */
         function autoScrollDataZoom(totalLen) {
+            if (!autoScrollX) {
+                // 左侧固定，全局压缩
+                myChart.setOption({
+                    dataZoom: [
+                        { type: 'inside', start: 0, end: 100 },
+                        { type: 'slider', start: 0, end: 100 }
+                    ]
+                }, false);
+                return;
+            }
+
+            // 自动滚屏模式
             const windowSize = 300;
-            if (totalLen <= windowSize) return;
+            if (totalLen <= windowSize) {
+                myChart.setOption({
+                    dataZoom: [
+                        { type: 'inside', start: 0, end: 100 },
+                        { type: 'slider', start: 0, end: 100 }
+                    ]
+                }, false);
+                return;
+            }
             const endPct = 100;
             const startPct = Math.max(0, Math.floor((1 - windowSize / totalLen) * 100));
             myChart.setOption({
@@ -1427,6 +1871,10 @@
                 btn.classList.toggle('active', idx === ch - 1);
             });
             saveConfig();
+            if (isYScaleLocked) {
+                lockCurrentYBounds();
+                updateYScaleUI();
+            }
             // 实时模式：使用 liveData 重渲染；历史模式：使用 cachedData
             renderChart(isLiveMode && liveData ? liveData : cachedData);
         }
@@ -1537,7 +1985,9 @@
                 {
                     type: 'value',
                     name: '24-bit AD 计数值',
-                    scale: true,
+                    scale: !isYScaleLocked,
+                    min: isYScaleLocked && lockedYMin !== null ? lockedYMin : undefined,
+                    max: isYScaleLocked && lockedYMax !== null ? lockedYMax : undefined,
                     axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
                     axisLabel: {
                         color: '#9ca3af',
@@ -1777,13 +2227,15 @@
                                     <span>状态判定:</span>
                                     <span>${stateStr}</span>
                                 </div>`;
-                        // 悬停时间附近有照片时，在提示框内显示照片
-                        const photo = findNearbyPhoto(params[0].name);
-                        if (photo) {
-                            res += `<div style="margin-top:6px;">
-                                        <img src="${photo.url}" style="max-width:220px;max-height:160px;border-radius:8px;display:block;border:1px solid rgba(255,255,255,0.2);">
-                                        <div style="font-size:0.72rem;color:#9ca3af;margin-top:3px;">📷 ${photo.timestamp}</div>
-                                    </div>`;
+                        // 悬停时间附近有照片且开启图片显示时，在提示框内显示照片
+                        if (showChartPhotos) {
+                            const photo = findNearbyPhoto(params[0].name);
+                            if (photo) {
+                                res += `<div style="margin-top:6px;">
+                                            <img src="${photo.url}" style="max-width:220px;max-height:160px;border-radius:8px;display:block;border:1px solid rgba(255,255,255,0.2);">
+                                            <div style="font-size:0.72rem;color:#9ca3af;margin-top:3px;">📷 ${photo.timestamp}</div>
+                                        </div>`;
+                            }
                         }
                         return res;
                     }
@@ -1808,10 +2260,18 @@
                 },
                 yAxis: yAxisConfigs,
                 dataZoom: [
-                    { type: 'inside', start: 0, end: 100 },
+                    {
+                        type: 'inside',
+                        start: (isLiveMode && autoScrollX && timestamps.length > 300)
+                            ? Math.max(0, Math.floor((1 - 300 / timestamps.length) * 100))
+                            : 0,
+                        end: 100
+                    },
                     {
                         type: 'slider',
-                        start: 0,
+                        start: (isLiveMode && autoScrollX && timestamps.length > 300)
+                            ? Math.max(0, Math.floor((1 - 300 / timestamps.length) * 100))
+                            : 0,
                         end: 100,
                         textStyle: { color: '#9ca3af' },
                         borderColor: 'rgba(255,255,255,0.1)',
