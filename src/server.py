@@ -60,6 +60,11 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 app.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
 
+# 前端静态资源服务 (CSS, JS)
+STATIC_DIR = os.path.join(SRC_DIR, "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 # ==========================================
 #  MQTT 拍摄触发配置（与 logger.py 保持一致）
 # ==========================================

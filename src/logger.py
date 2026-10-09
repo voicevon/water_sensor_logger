@@ -12,6 +12,7 @@ MQTT_BROKER       = "voicevon.vicp.io"       # MQTT Broker 地址
 MQTT_PORT         = 1883                     # MQTT 端口
 MQTT_USERNAME     = "von"                    # MQTT 用户名
 MQTT_PASSWORD     = "von123456"              # MQTT 密码
+MQTT_CLIENT_ID    = "water_logger_daemon_pc" # 采集端 Client ID
 MQTT_TOPIC        = "water/sensor/status"    # 数据订阅主题
 MQTT_CAMERA_TOPIC = "water/photo/status/dongzhan"  # 照片订阅主题
 ROOT_DIR          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,11 +75,35 @@ def on_connect(client, userdata, flags, reason_code, properties):
     else:
         print(f"[MQTT] 连接失败，错误码 (reason_code): {reason_code}")
 
-def on_disconnect(client, userdata, flags, reason_code, properties):
+def on_disconnect(client, userdata, *args, **kwargs):
     """
-    连接断开回调 (paho-mqtt v2 CallbackAPIVersion.VERSION2)
+    连接断开回调 (兼容 paho-mqtt v1 与 v2)
     """
-    print(f"[MQTT] 连接已断开，尝试自动重新连接... 状态码: {reason_code}")
+    reason_code = None
+    if len(args) >= 2:
+        reason_code = args[1]
+    elif len(args) >= 1:
+        reason_code = args[0]
+    elif "reason_code" in kwargs:
+        reason_code = kwargs["reason_code"]
+    elif "rc" in kwargs:
+        reason_code = kwargs["rc"]
+
+    rc_str = str(reason_code) if reason_code is not None else ""
+    rc_val = getattr(reason_code, "value", reason_code)
+
+    if rc_val == 0 or rc_str == "Success":
+        print("[MQTT] 连接已正常关闭。")
+    elif "Unspecified error" in rc_str or rc_val in (7, 128) or "128" in rc_str:
+        print("----------------------------------------------------------------------")
+        print(f"[MQTT] ⚠️ 警告：连接已被 MQTT Broker 强制切断！")
+        print(f"       原因分析: 检测到其它相同 Client ID ('{MQTT_CLIENT_ID}') 的实例正在运行。")
+        print(f"       根据 MQTT 协议规则，两个相同实例正在『互相踢下线』抢占连接。")
+        print(f"       解决建议: 若您在其它窗口也运行了 logger.py，请将其关闭保留唯一实例。")
+        print(f"       当前实例正在尝试自动重新连接...")
+        print("----------------------------------------------------------------------")
+    else:
+        print(f"[MQTT] ⚠️ 连接断开 (状态码: {reason_code})，尝试自动重新连接...")
 
 def on_message(client, userdata, msg):
     """
@@ -220,10 +245,10 @@ def main():
     # client_id 必须全网唯一：与远端部署的同名客户端会互相踢下线，后缀 _pc 区分本机实例
     try:
         # paho-mqtt v2.0+: 使用 VERSION2 消除 DeprecationWarning
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="water_logger_daemon_pc", clean_session=True)
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=MQTT_CLIENT_ID, clean_session=True)
     except AttributeError:
         # paho-mqtt v1.x 降级兼容
-        client = mqtt.Client(client_id="water_logger_daemon_pc", clean_session=True)
+        client = mqtt.Client(client_id=MQTT_CLIENT_ID, clean_session=True)
     
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
