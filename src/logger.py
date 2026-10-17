@@ -187,6 +187,8 @@ def _on_camera_message(msg):
 
         with open(path, "wb") as f:
             f.write(img)
+            f.flush()
+            os.fsync(f.fileno())  # 强制照片数据落盘，防止断电丢失
         print(f"[Photo] {ts.strftime('%Y-%m-%d %H:%M:%S')} 已保存 {filename} ({len(img)} 字节) topic={msg.topic}")
 
     except json.JSONDecodeError:
@@ -229,9 +231,12 @@ def _on_sensor_message(msg):
             
             # 写入一行数据
             writer.writerow([timestamp_str, sensor1, sensor2, sensor3, state_byte])
-            
-            # 强制刷新缓冲区到磁盘，以便 Web 服务实时读取
+
+            # 强制刷新缓冲区到 OS 页缓存，并 fsync 强制写入物理磁盘。
+            # Fix: 仅 flush() 数据仍在操作系统页缓存中，突然断电/关机会导致
+            # 页缓存中未回写的数据全部丢失（Web 刷新时能看到，重启后消失）。
             f.flush()
+            os.fsync(f.fileno())
             
         print(f"[Log] {timestamp_str} -> S1: {sensor1}, S2: {sensor2}, S3: {sensor3}, State: {state_byte}")
         
