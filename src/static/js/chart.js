@@ -10,7 +10,7 @@ export const CHANNEL_NAMES = {
     3: '铁盐'
 };
 
-export function initChartDom(domId, onMouseOverMarkPoint, onMouseOutMarkPoint) {
+export function initChartDom(domId, onMouseOverMarkPoint, onMouseOutMarkPoint, onUserZoom = null) {
     const chartDom = document.getElementById(domId);
     if (!chartDom) return null;
     const chartInstance = echarts.init(chartDom, 'dark');
@@ -33,41 +33,107 @@ export function initChartDom(domId, onMouseOverMarkPoint, onMouseOutMarkPoint) {
         chartInstance.on('globalout', onMouseOutMarkPoint);
     }
 
+    // 监听用户手动缩放与拖动交互（锁定用户调节的左侧时间位置）
+    chartInstance.on('dataZoom', params => {
+        if (isProgrammaticZoom) return;
+
+        const opt = chartInstance.getOption();
+        if (!opt || !opt.dataZoom || !opt.dataZoom[0]) return;
+        const dz = opt.dataZoom[0];
+        const timestamps = opt.xAxis && opt.xAxis[0] ? opt.xAxis[0].data : [];
+        if (!timestamps || !timestamps.length) return;
+
+        let leftVal = null;
+        if (dz.startValue !== undefined && dz.startValue !== null) {
+            if (typeof dz.startValue === 'number') {
+                const idx = Math.max(0, Math.min(timestamps.length - 1, Math.round(dz.startValue)));
+                leftVal = timestamps[idx];
+            } else {
+                leftVal = dz.startValue;
+            }
+        } else if (dz.start !== undefined && dz.start !== null) {
+            const idx = Math.max(0, Math.min(timestamps.length - 1, Math.round((dz.start / 100) * (timestamps.length - 1))));
+            leftVal = timestamps[idx];
+        }
+
+        if (leftVal) {
+            manualLeftValue = leftVal;
+            if (onUserZoom) onUserZoom(manualLeftValue);
+        }
+    });
+
     return chartInstance;
 }
 
-export function autoScrollDataZoom(chartInstance, totalLen, autoScrollX) {
+// 记录用户手动控制的 X 轴左侧起始点（时间戳字符串）
+let manualLeftValue = null;
+let isProgrammaticZoom = false;
+
+export function setManualLeftValue(val) {
+    manualLeftValue = val;
+}
+
+export function getManualLeftValue() {
+    return manualLeftValue;
+}
+
+export function autoScrollDataZoom(chartInstance, totalLen, autoScrollX, timestamps = null) {
     if (!chartInstance) return;
+
     if (!autoScrollX) {
-        // 左侧固定，全局压缩
+        // 左侧锁定模式：左边锁定在用户拖动/设置的位置，右边自动填充（end: 100）
+        let zoomOption;
+        if (manualLeftValue && timestamps && timestamps.length) {
+            const startIdx = timestamps.indexOf(manualLeftValue);
+            if (startIdx >= 0) {
+                zoomOption = {
+                    start: null,
+                    startValue: startIdx,
+                    end: 100,
+                    endValue: null
+                };
+            } else {
+                zoomOption = { start: 0, startValue: null, end: 100, endValue: null };
+            }
+        } else {
+            zoomOption = { start: 0, startValue: null, end: 100, endValue: null };
+        }
+
+        isProgrammaticZoom = true;
         chartInstance.setOption({
             dataZoom: [
-                { type: 'inside', start: 0, end: 100 },
-                { type: 'slider', start: 0, end: 100 }
+                { type: 'inside', ...zoomOption },
+                { type: 'slider', ...zoomOption }
             ]
         }, false);
+        isProgrammaticZoom = false;
         return;
     }
 
     // 自动滚屏模式（追踪最后 300 点）
     const windowSize = 300;
     if (totalLen <= windowSize) {
+        isProgrammaticZoom = true;
         chartInstance.setOption({
             dataZoom: [
-                { type: 'inside', start: 0, end: 100 },
-                { type: 'slider', start: 0, end: 100 }
+                { type: 'inside', start: 0, startValue: null, end: 100, endValue: null },
+                { type: 'slider', start: 0, startValue: null, end: 100, endValue: null }
             ]
         }, false);
+        isProgrammaticZoom = false;
         return;
     }
+
     const endPct = 100;
     const startPct = Math.max(0, Math.floor((1 - windowSize / totalLen) * 100));
+    isProgrammaticZoom = true;
     chartInstance.setOption({
         dataZoom: [
-            { type: 'inside', start: startPct, end: endPct },
-            { type: 'slider', start: startPct, end: endPct }
+            { type: 'inside', start: startPct, startValue: null, end: endPct, endValue: null },
+            { type: 'slider', start: startPct, startValue: null, end: endPct, endValue: null }
         ]
     }, false);
+    isProgrammaticZoom = false;
 }
 
 export function applyYScaleToChart(chartInstance, isYScaleLocked, lockedYMin, lockedYMax) {
@@ -116,7 +182,7 @@ export function lockCurrentYBounds(data, currentChannel) {
 }
 
 export function buildPhotoMarks(sensorData, timestamps, showChartPhotos, allPhotos) {
-    if (!showChartPhotos || !allPhotos.length || !sensorData || !timestamps || !timestamps.length) return [];
+    if (!showChartPhotos || !allPhotos || !allPhotos.length || !sensorData || !timestamps || !timestamps.length) return [];
     const marks = [];
     for (const p of allPhotos) {
         const t = photoToMs(p.timestamp);
@@ -304,7 +370,7 @@ export function appendToChart(chartInstance, delta, currentChannel, algorithm, e
         series: seriesUpdates
     }, false);
 
-    autoScrollDataZoom(chartInstance, newX.length, autoScrollX);
+    autoScrollDataZoom(chartInstance, newX.length, autoScrollX, newX);
 }
 
 export function renderChart(chartInstance, data, state) {
@@ -614,14 +680,20 @@ export function renderChart(chartInstance, data, state) {
                 type: 'inside',
                 start: (state.isLiveMode && state.autoScrollX && timestamps.length > 300)
                     ? Math.max(0, Math.floor((1 - 300 / timestamps.length) * 100))
-                    : 0,
+                    : (!state.autoScrollX && manualLeftValue && timestamps.indexOf(manualLeftValue) >= 0 ? null : 0),
+                startValue: (!state.autoScrollX && manualLeftValue && timestamps.indexOf(manualLeftValue) >= 0)
+                    ? timestamps.indexOf(manualLeftValue)
+                    : null,
                 end: 100
             },
             {
                 type: 'slider',
                 start: (state.isLiveMode && state.autoScrollX && timestamps.length > 300)
                     ? Math.max(0, Math.floor((1 - 300 / timestamps.length) * 100))
-                    : 0,
+                    : (!state.autoScrollX && manualLeftValue && timestamps.indexOf(manualLeftValue) >= 0 ? null : 0),
+                startValue: (!state.autoScrollX && manualLeftValue && timestamps.indexOf(manualLeftValue) >= 0)
+                    ? timestamps.indexOf(manualLeftValue)
+                    : null,
                 end: 100,
                 textStyle: { color: '#9ca3af' },
                 borderColor: 'rgba(255,255,255,0.1)',
@@ -631,11 +703,13 @@ export function renderChart(chartInstance, data, state) {
         series: seriesConfigs
     };
 
+    isProgrammaticZoom = true;
     chartInstance.setOption(option, true);
+    isProgrammaticZoom = false;
     updateMetrics(sensorData);
     refreshPhotoMarks(chartInstance, data, state.currentChannel, state.showChartPhotos, state.allPhotos);
 
     if (state.isLiveMode) {
-        autoScrollDataZoom(chartInstance, timestamps.length, state.autoScrollX);
+        autoScrollDataZoom(chartInstance, timestamps.length, state.autoScrollX, timestamps);
     }
 }

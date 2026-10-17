@@ -100,8 +100,9 @@ def on_disconnect(client, userdata, *args, **kwargs):
         print(f"       原因分析: 检测到其它相同 Client ID ('{MQTT_CLIENT_ID}') 的实例正在运行。")
         print(f"       根据 MQTT 协议规则，两个相同实例正在『互相踢下线』抢占连接。")
         print(f"       解决建议: 若您在其它窗口也运行了 logger.py，请将其关闭保留唯一实例。")
-        print(f"       当前实例正在尝试自动重新连接...")
+        print(f"       当前实例将在 3 秒后尝试重新连接...")
         print("----------------------------------------------------------------------")
+        time.sleep(3)
     else:
         print(f"[MQTT] ⚠️ 连接断开 (状态码: {reason_code})，尝试自动重新连接...")
 

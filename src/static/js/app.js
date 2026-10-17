@@ -20,7 +20,7 @@ import {
     fetchPhotos as apiFetchPhotos,
     fetchStationConfig,
     saveStationConfig as apiSaveStationConfig,
-    doCapture,
+    requestImmediateCapture,
     loadAutoCaptureState,
     setAutoCaptureState,
     fetchHistoryData,
@@ -32,6 +32,8 @@ import {
     renderChart as chartRender,
     appendToChart as chartAppend,
     autoScrollDataZoom,
+    setManualLeftValue,
+    getManualLeftValue,
     applyYScaleToChart,
     lockCurrentYBounds,
     refreshPhotoMarks,
@@ -85,13 +87,16 @@ function getChartRenderState() {
 
 export function setAutoScroll(enabled) {
     autoScrollX = !!enabled;
+    if (autoScrollX) {
+        setManualLeftValue(null);
+    }
     updateScrollUI();
     saveConfig();
     
     if (myChart) {
         const option = myChart.getOption();
-        const totalLen = (option.xAxis && option.xAxis[0].data) ? option.xAxis[0].data.length : 0;
-        autoScrollDataZoom(myChart, totalLen, autoScrollX);
+        const timestamps = (option.xAxis && option.xAxis[0].data) ? option.xAxis[0].data : [];
+        autoScrollDataZoom(myChart, timestamps.length, autoScrollX, timestamps);
     }
 }
 
@@ -104,6 +109,7 @@ export function updateScrollUI() {
     const text = document.getElementById('btn-x-scroll-text');
     const toggle = document.getElementById('sidebar-x-scroll-toggle');
     const desc = document.getElementById('sidebar-x-desc');
+    const manualLeft = getManualLeftValue();
 
     if (autoScrollX) {
         if (btn) {
@@ -118,9 +124,9 @@ export function updateScrollUI() {
             btn.classList.add('active');
             btn.classList.remove('scrolling');
         }
-        if (text) text.innerText = '左侧固定(全景压缩)';
+        if (text) text.innerText = manualLeft ? `左侧锁定 (${manualLeft})` : '左侧固定(全景压缩)';
         if (toggle) toggle.checked = false;
-        if (desc) desc.innerText = '关: 左侧固定全景压缩';
+        if (desc) desc.innerText = manualLeft ? `关: 锁定自 ${manualLeft}，右侧自动填充` : '关: 左侧固定全景压缩';
     }
 }
 
@@ -405,7 +411,7 @@ export async function triggerCapture() {
     }
 
     try {
-        await doCapture();
+        await requestImmediateCapture();
         const targetDate = document.getElementById('date-select')?.value || todayLocal();
         setTimeout(async () => {
             if (btn) {
@@ -619,6 +625,11 @@ export async function fetchData() {
     if (myChart) myChart.showLoading();
     
     const date = document.getElementById('date-select')?.value || todayLocal();
+    if (lastLoadedDate && lastLoadedDate !== date) {
+        setManualLeftValue(null);
+        updateScrollUI();
+    }
+    lastLoadedDate = date;
     const params = {
         date,
         algorithm: document.getElementById('algo-select')?.value || 'dynamic',
@@ -650,11 +661,20 @@ export async function fetchData() {
 // ============================================================
 //  启动初始化生命周期
 // ============================================================
-window.addEventListener('DOMContentLoaded', async () => {
+async function initApp() {
     initModalListeners();
     myChart = initChartDom('chart', 
         (params) => showPhotoHover(params, allPhotos),
-        () => hidePhotoHover()
+        () => hidePhotoHover(),
+        (newLeftVal) => {
+            // 用户手动拖拽 X 轴缩放/平移时：
+            // 若原本处于自动滚屏模式，则自动关闭滚屏，转入用户手动锁定模式
+            if (autoScrollX) {
+                autoScrollX = false;
+                saveConfig();
+            }
+            updateScrollUI();
+        }
     );
 
     await fetchDates();
@@ -672,8 +692,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     const autoCap = await loadAutoCaptureState();
     const autoCapCb = document.getElementById('auto-capture-checkbox');
     const autoCapToggle = document.getElementById('auto-capture-toggle');
-    if (autoCapCb) autoCapCb.checked = autoCap.auto_capture;
-    if (autoCapToggle) autoCapToggle.classList.toggle('active', autoCap.auto_capture);
+    if (autoCapCb) autoCapCb.checked = autoCap?.auto_capture;
+    if (autoCapToggle) autoCapToggle.classList.toggle('active', !!autoCap?.auto_capture);
 
     document.getElementById('algo-select')?.addEventListener('change', function() {
         const algo = this.value;
@@ -686,7 +706,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('resize', () => {
         if (myChart) myChart.resize();
     });
-});
+}
+
+// 确保在任何就绪状态下均可靠启动，防止 ES Module 异步执行时错过 DOMContentLoaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
 
 // ============================================================
 //  向 window 全局暴露方法，保证 HTML inline 事件 100% 连贯响应

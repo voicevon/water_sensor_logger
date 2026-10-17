@@ -64,7 +64,7 @@ export async function saveStationConfig(stationName) {
     return await res.json();
 }
 
-export async function doCapture() {
+export async function requestImmediateCapture() {
     const res = await fetch('/api/capture', { method: 'POST' });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'capture failed');
