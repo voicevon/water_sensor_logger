@@ -7,6 +7,7 @@ import time
 import uuid
 import asyncio
 from datetime import datetime
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,15 +35,12 @@ def _sanitize_raw(r1: int, r2: int, r3: int, prev: list) -> tuple:
             prev[i] = vals[i]
     return vals[0], vals[1], vals[2]
 
-# Fix #9: 收紧 CORS 配置，仅允许本地开发环境访问，生产环境应进一步限制为实际部署域名
+# CORS 配置：支持本地回环与局域网设备接入
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origin_regex=r"^https?://.*$",
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -264,13 +262,18 @@ async def update_station_config(request: Request):
         print(f"[Config] 保存成功但下发启动指令异常: {e}")
         return {"ok": True, "station_name": new_station, "sample_interval": new_interval, "warning": str(e)}
 
-@app.on_event("startup")
-async def _startup_tasks():
-    """服务启动：加载持久化配置；若定时拍摄为开，恢复后台循环"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """服务生命周期管理：加载持久化配置；若定时拍摄为开，恢复后台循环；关闭时安全取消"""
     _load_config()
     global _auto_capture_task
     if _app_config.get("auto_capture") and (_auto_capture_task is None or _auto_capture_task.done()):
         _auto_capture_task = asyncio.create_task(_auto_capture_loop())
+    yield
+    if _auto_capture_task and not _auto_capture_task.done():
+        _auto_capture_task.cancel()
+
+app.router.lifespan_context = lifespan
 
 # ==========================================
 #  Fix #10: 提取算法实例工厂函数，消除三处重复的实例化代码
@@ -741,5 +744,5 @@ async def stream_realtime(
 
 if __name__ == "__main__":
     import uvicorn
-    print("[Server] 启动 Web 服务，监听端口: 8000")
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    print("[Server] 启动 Web 服务，监听端口: 8000 (所有网络接口)")
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

@@ -12,7 +12,7 @@ import {
     showPhotoHover,
     hidePhotoHover,
     initModalListeners
-} from './modal.js';
+} from './modal.js?v=20261019_fix';
 
 import {
     todayLocal,
@@ -25,7 +25,7 @@ import {
     setAutoCaptureState,
     fetchHistoryData,
     createEventSourceStream
-} from './api.js';
+} from './api.js?v=20261019_fix';
 
 import {
     initChartDom,
@@ -38,7 +38,7 @@ import {
     lockCurrentYBounds,
     refreshPhotoMarks,
     updateMetrics
-} from './chart.js';
+} from './chart.js?v=20261019_fix';
 
 // ============================================================
 //  全局响应状态
@@ -65,6 +65,7 @@ let isYScaleLocked = false;
 let lockedYMin = null;
 let lockedYMax = null;
 let showChartPhotos = true;
+let lastLoadedDate = null;
 
 // ============================================================
 //  UI 状态同步辅助
@@ -520,6 +521,7 @@ export function startLiveStream() {
             showLiveBadge(true);
             document.getElementById('chart-card')?.classList.add('live-border');
             chartRender(myChart, liveData, getChartRenderState());
+            if (myChart) myChart.hideLoading();
 
         } else if (payload.type === 'delta') {
             if (!liveData) return;
@@ -549,6 +551,7 @@ export function startLiveStream() {
     eventSource.onerror = () => {
         setStatus('idle');
         showLiveBadge(false);
+        if (myChart) myChart.hideLoading();
     };
 
     loadPhotos(todayLocal());
@@ -623,31 +626,31 @@ export async function fetchData() {
     }
 
     if (myChart) myChart.showLoading();
-    
-    const date = document.getElementById('date-select')?.value || todayLocal();
-    if (lastLoadedDate && lastLoadedDate !== date) {
-        setManualLeftValue(null);
-        updateScrollUI();
-    }
-    lastLoadedDate = date;
-    const params = {
-        date,
-        algorithm: document.getElementById('algo-select')?.value || 'dynamic',
-        threshold_offset: document.getElementById('offset-slider')?.value || 3200,
-        ma_window: document.getElementById('ma-slider')?.value || 50,
-        baseline_window: document.getElementById('base-slider')?.value || 200,
-        var_baseline_ma: document.getElementById('var-base-slider')?.value || 200,
-        var_variance_ma: document.getElementById('var-ma-slider')?.value || 30,
-        var_threshold: parseInt(document.getElementById('var-thresh-slider')?.value || 500000),
-        env_window: document.getElementById('env-window-slider')?.value || 30,
-        env_dry_window_up: document.getElementById('env-dry-window-up-slider')?.value || 1000,
-        env_dry_window_down: document.getElementById('env-dry-window-down-slider')?.value || 1000,
-        env_upper_offset: parseInt(document.getElementById('env-upper-offset-slider')?.value || 5000),
-        env_lower_offset: parseInt(document.getElementById('env-lower-offset-slider')?.value || 3000),
-        downsample: document.getElementById('downsample-select')?.value || 10
-    };
 
     try {
+        const date = document.getElementById('date-select')?.value || todayLocal();
+        if (lastLoadedDate && lastLoadedDate !== date) {
+            setManualLeftValue(null);
+            updateScrollUI();
+        }
+        lastLoadedDate = date;
+        const params = {
+            date,
+            algorithm: document.getElementById('algo-select')?.value || 'dynamic',
+            threshold_offset: document.getElementById('offset-slider')?.value || 3200,
+            ma_window: document.getElementById('ma-slider')?.value || 50,
+            baseline_window: document.getElementById('base-slider')?.value || 200,
+            var_baseline_ma: document.getElementById('var-base-slider')?.value || 200,
+            var_variance_ma: document.getElementById('var-ma-slider')?.value || 30,
+            var_threshold: parseInt(document.getElementById('var-thresh-slider')?.value || 500000),
+            env_window: document.getElementById('env-window-slider')?.value || 30,
+            env_dry_window_up: document.getElementById('env-dry-window-up-slider')?.value || 1000,
+            env_dry_window_down: document.getElementById('env-dry-window-down-slider')?.value || 1000,
+            env_upper_offset: parseInt(document.getElementById('env-upper-offset-slider')?.value || 5000),
+            env_lower_offset: parseInt(document.getElementById('env-lower-offset-slider')?.value || 3000),
+            downsample: document.getElementById('downsample-select')?.value || 10
+        };
+
         cachedData = await fetchHistoryData(params);
         chartRender(myChart, cachedData, getChartRenderState());
         await loadPhotos(date);

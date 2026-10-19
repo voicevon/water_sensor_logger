@@ -341,10 +341,9 @@ export function appendToChart(chartInstance, delta, currentChannel, algorithm, e
         ];
     } else if (algorithm === "discrete") {
         seriesUpdates = [
-            { data: [...(option.series[0].data || []), ...sd.raw] },
-            { data: [...(option.series[1].data || []), ...sd.baseline] },
-            { data: [...(option.series[2].data || []), ...sd.filtered] },
-            { data: [...(option.series[3].data || []), ...sd.threshold] },
+            { data: [...(option.series[0]?.data || []), ...sd.raw] },
+            { data: [...(option.series[1]?.data || []), ...sd.baseline] },
+            { data: [...(option.series[2]?.data || []), ...sd.filtered] },
         ];
     } else if (algorithm === "envelope") {
         const newDiffs = sd.filtered.map((val, idx) => +(val - sd.baseline[idx]).toFixed(2));
