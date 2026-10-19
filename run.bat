@@ -1,4 +1,6 @@
 @echo off
+:: 设置控制台为 UTF-8 代码页，防止中文字符和提示信息出现乱码
+chcp 65001 >nul
 title Water Logger Launcher
 echo ===================================================
 echo  Starting water_logger (Double-Process Architecture)
