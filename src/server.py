@@ -744,5 +744,19 @@ async def stream_realtime(
 
 if __name__ == "__main__":
     import uvicorn
+    import subprocess
+    import re
+
+    # 自动检测并释放 8000 端口残留僵死进程（自愈机制，防止端口绑定冲突）
+    try:
+        netstat_out = subprocess.check_output("netstat -ano", shell=True, text=True, stderr=subprocess.DEVNULL)
+        for m in re.finditer(r":8000\s+.*?LISTENING\s+(\d+)", netstat_out):
+            stale_pid = int(m.group(1))
+            if stale_pid != os.getpid():
+                subprocess.run(["taskkill", "/F", "/PID", str(stale_pid)], capture_output=True)
+                time.sleep(0.3)
+    except Exception:
+        pass
+
     print("[Server] 启动 Web 服务，监听端口: 8000 (所有网络接口)")
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
